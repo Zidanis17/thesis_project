@@ -1,0 +1,63 @@
+{
+  "framework_id": "EF-02",
+  "name": "Deontological Rule-Based Safety",
+  "title": "EF-02 — Deontological Rule-Based Safety",
+  "source": "EF-02 — Deontological Rule-Based Safety",
+  "alias": "RSS Constraint-Based Ethics",
+  "category": "ethical_frameworks",
+  "foundation": "Fixed moral rules hold regardless of outcome. The AV has an inviolable duty never to be the proximate cause of harm. Safety obligations are not trade-offs — they are categorical constraints. The Responsibility-Sensitive Safety (RSS) model formalises this: an AV that follows RSS rules can never be held causally responsible for a collision.",
+  "decision_logic": "Enforce hard safety constraints derived from RSS: maintain safe longitudinal distance d_min = v_r * rho + (v_r^2 / 2*a_min) - (v_f^2 / 2*a_max), respect lateral safe gaps, obey right-of-way rules and speed limits. Any candidate trajectory that violates a hard constraint is categorically rejected regardless of its expected utility or risk score. Only trajectories within the safe envelope are evaluated further. If no trajectory satisfies all constraints, the AV must perform a proper response (emergency braking) rather than choose the lesser harm.",
+  "pros": [
+    "Predictable and consistent — same rules apply in every scenario",
+    "Legally aligned — compatible with existing traffic law and liability frameworks",
+    "Does not discriminate between individuals based on group membership or numbers",
+    "Formally verifiable — safety guarantees can be mathematically proven",
+    "Appropriate for routine non-dilemma driving which covers the vast majority of cases",
+    "Clear responsibility attribution — RSS compliance means the AV cannot be at fault"
+  ],
+  "cons": [
+    "Inflexible in genuine edge cases — may produce no valid action in unavoidable dilemmas",
+    "Cannot weigh competing harms when all available options violate some rule",
+    "Rules may conflict across jurisdictions requiring jurisdiction-specific parameterisation",
+    "Does not account for contextual moral nuance or vulnerability of individuals",
+    "Binary outcome — a trajectory either passes or fails, no gradient for optimisation"
+  ],
+  "best_fit_scenarios": [
+    "routine non-dilemma driving which constitutes the vast majority of AV operation",
+    "legally regulated environments with clear right-of-way rules",
+    "scenarios where responsibility attribution and legal liability matter",
+    "highway scenarios with well-defined lane discipline and following distance rules",
+    "any scenario where a safe trajectory exists that avoids all conflicts"
+  ],
+  "poor_fit_scenarios": [
+    "genuine unavoidable collision dilemmas where all options cause harm",
+    "novel scenarios not covered by existing traffic rules",
+    "scenarios requiring comparison between two harmful outcomes",
+    "emergency situations where rule violation may reduce overall harm"
+  ],
+  "tradeoffs": "vs Utilitarian (EF-01): rejects any harm-minimising action that violates a hard rule even if it would reduce total expected harm. vs Maximin (EF-03): does not consider the welfare of the worst-off party — if protecting the most vulnerable requires a rule violation, EF-02 disallows it. vs Ethics of Risk (EF-04): acts as a hard filter before EF-04 weighted optimisation — EF-02 defines the feasible set, EF-04 selects within it. vs EVT (EF-05): rule-based, not outcome-based — social valence of road user types is irrelevant to rule compliance.",
+  "key_parameters": [
+    "safe_distance_min d_min based on reaction time rho and braking bounds",
+    "reaction_time rho (default 1-2 seconds)",
+    "max_deceleration a_min for ego vehicle",
+    "min_deceleration a_max for front vehicle",
+    "lateral_safe_gap",
+    "RSS_compliance_flag (boolean per trajectory)",
+    "right_of_way_status"
+  ],
+  "scenario_tags": [
+    "routine_driving",
+    "highway",
+    "urban_intersection",
+    "rule_based",
+    "safety_envelope",
+    "RSS",
+    "deontological",
+    "legal_compliance",
+    "collision_avoidable"
+  ],
+  "source_papers": [
+    "Naumann et al. (2021) — On Responsibility Sensitive Safety in Car-following Situations",
+    "Geisslinger et al. (2023) — An Ethical Trajectory Planning Algorithm for Autonomous Vehicles"
+  ]
+}

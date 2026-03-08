@@ -1,0 +1,60 @@
+{
+  "framework_id": "EF-06",
+  "name": "Virtue Ethics",
+  "title": "EF-06 — Virtue Ethics (Skilled Driver Analogy)",
+  "source": "EF-06 — Virtue Ethics (Skilled Driver Analogy)",
+  "alias": "Skilled Driver Analogy and Reasonable Driver Standard",
+  "category": "ethical_frameworks",
+  "foundation": "Act as a skilled, virtuous, and prudent driver would act. The moral quality of a decision is judged not only by its outcome or its compliance with rules, but by the character of the reasoning process that produced it. A virtuous AV exercises practical wisdom (phronesis): it adapts its judgment to the specific situation, applies due care, and acts proportionately. This mirrors the common-law reasonable driver standard used in negligence liability.",
+  "decision_logic": "No formal optimisation function. The LLM agent evaluates the scenario against virtuous driver norms using qualitative reasoning: Was due care exercised given the road conditions and available information? Was the response proportionate to the level of risk? Would a skilled, experienced, and reasonable human driver make this judgment in this situation? What would a driver with good character — cautious, fair, and attentive — do here? EF-06 is used as a meta-level justification layer: it wraps the output of any other framework in natural language that explains the decision in terms a non-expert can understand. It also serves as the primary fallback for novel scenarios that fall outside the training distribution of formal models.",
+  "pros": [
+    "Highly context-sensitive — handles novel and ambiguous edge cases that formal models cannot cover",
+    "Aligns with common-law negligence standards making it legally intelligible",
+    "Provides natural language justification that is accessible to regulators, passengers, and the public",
+    "Useful as an explainability and communication layer on top of any formal framework",
+    "Does not require explicit probability estimates or harm functions"
+  ],
+  "cons": [
+    "Cannot be formalised as a computational optimisation target",
+    "Subjective — the virtuous driver norm varies across cultures, jurisdictions, and individuals",
+    "Cannot be empirically validated in the same way as formal quantitative models",
+    "Not suitable as a standalone primary decision mechanism for real-time AV control",
+    "Output quality depends heavily on the quality of the LLM generating the reasoning"
+  ],
+  "best_fit_scenarios": [
+    "generating natural language justifications for any framework selection decision",
+    "novel scenarios outside the coverage of formal models",
+    "legal and regulatory contexts requiring reasonable driver standard framing",
+    "communicating AV decisions to passengers or the public in understandable terms",
+    "edge cases where formal frameworks produce no valid action or conflicting outputs"
+  ],
+  "poor_fit_scenarios": [
+    "primary real-time computational decision-making requiring a deterministic output",
+    "scenarios requiring auditable decision traces with formal correctness guarantees",
+    "high-speed scenarios where sub-200ms decision time is required",
+    "any scenario where the output must be independently verifiable"
+  ],
+  "tradeoffs": "EF-06 does not directly compete with EF-01 through EF-05 — it operates at a different level. Rather than selecting a trajectory, it explains and contextualises the selection made by another framework. It can wrap any of EF-01 to EF-05 to produce a human-readable justification. As a fallback it provides a common-sense prior when formal frameworks cannot produce a valid output. Think of EF-01 to EF-05 as the decision engines and EF-06 as the communication and reasoning layer above them.",
+  "key_parameters": [
+    "scenario_context: full structured scenario description",
+    "driver_norms: due care, proportionality, attentiveness, fairness",
+    "reasonableness_standard: what would a skilled human driver do",
+    "selected_framework_output: the decision produced by EF-01 to EF-05 being wrapped",
+    "jurisdiction: shapes what the reasonable driver standard means locally"
+  ],
+  "scenario_tags": [
+    "novel_scenario",
+    "edge_case",
+    "explanation_layer",
+    "natural_language_justification",
+    "reasonable_driver",
+    "virtue_ethics",
+    "fallback",
+    "legal_framing",
+    "communication"
+  ],
+  "source_papers": [
+    "Poszler et al. (2023) — Applying ethical theories to the decision-making of self-driving vehicles",
+    "Xu et al. (2025) — Where is morality on wheels? Decoding LLM-driven decisions in ethical dilemmas of AVs"
+  ]
+}

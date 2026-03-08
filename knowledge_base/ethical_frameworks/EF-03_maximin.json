@@ -1,0 +1,64 @@
+{
+  "framework_id": "EF-03",
+  "name": "Rawlsian Maximin",
+  "title": "EF-03 — Rawlsian Maximin",
+  "source": "EF-03 — Rawlsian Maximin",
+  "alias": "Egalitarian Worst-Case Protection",
+  "category": "ethical_frameworks",
+  "foundation": "Maximise the welfare of the worst-off party. From behind a veil of ignorance about which road user you are, rational agents would choose rules that protect the most vulnerable because any one of them could be in the worst position. Risk distributions are only justified if they benefit the least advantaged. Inequalities in harm exposure must favour those most at risk.",
+  "decision_logic": "Among all feasible trajectories, select the one that minimizes the maximum risk borne by any single individual: argmin over trajectories of max over all road users i of Risk_i. This shifts harm away from the most exposed individual even if doing so increases total expected harm across the group. Each road user's risk is weighted by their vulnerability class: children, elderly, and cyclists receive higher vulnerability weights.",
+  "pros": [
+    "Protects vulnerable individuals regardless of group size — one child matters as much as ten adults",
+    "Aligns with social justice, equity, and human rights principles",
+    "Culturally resonant in European jurisdictions with strong vulnerable road user (VRU) protections",
+    "Reduces catastrophic worst-case outcomes even at cost to aggregate efficiency",
+    "Legally aligned with EU AV guidelines that require special protection for VRUs"
+  ],
+  "cons": [
+    "May significantly increase total expected harm in order to protect one individual",
+    "Computationally more demanding — requires per-individual risk tracking across all road users",
+    "Definition of worst-off can be ambiguous when multiple parties have similar vulnerability",
+    "May produce counter-intuitive outcomes in large group scenarios",
+    "Does not consider the probability that the worst-off party is actually harmed"
+  ],
+  "best_fit_scenarios": [
+    "scenarios involving clearly vulnerable individuals such as children, elderly, or cyclists",
+    "school_zone environments",
+    "hospital_zone environments",
+    "pedestrian-heavy urban environments",
+    "VRU_present scenarios where a cyclist or child is among the road users",
+    "jurisdictions with strong legal protections for vulnerable road users"
+  ],
+  "poor_fit_scenarios": [
+    "high-speed highway scenarios where aggregate efficiency is primary",
+    "scenarios with no clearly identifiable worst-off party among equally vulnerable road users",
+    "multi_vehicle scenarios where all parties have equal vulnerability",
+    "scenarios where protecting one individual creates catastrophic harm to many others"
+  ],
+  "tradeoffs": "vs Utilitarian (EF-01): increases total expected harm in order to protect the worst-off individual — EF-01 would accept harming the vulnerable if total harm is reduced. vs Deontological (EF-02): may select a trajectory that violates a rule if that is necessary to protect the most vulnerable — EF-02 would reject it. vs Ethics of Risk (EF-04): EF-04 includes maximin as one weighted component alongside aggregate and equality terms — EF-03 is the pure maximin extreme. vs EVT (EF-05): EF-03 focuses purely on risk magnitude without social valence weighting — EVT additionally considers the social hierarchy of road user types.",
+  "key_parameters": [
+    "risk_per_road_user R_i for each individual i",
+    "vulnerability_index V_i (child, elderly, cyclist receive higher weights)",
+    "maximin_objective: minimise max_i(R_i)",
+    "weighted_risk R_i * V_i used in practice to account for differential vulnerability"
+  ],
+  "scenario_tags": [
+    "VRU_present",
+    "school_zone",
+    "hospital_zone",
+    "pedestrian",
+    "child",
+    "elderly",
+    "cyclist",
+    "vulnerable_road_user",
+    "maximin",
+    "egalitarian",
+    "worst_case_protection",
+    "collision_unavoidable"
+  ],
+  "source_papers": [
+    "Geisslinger et al. (2021) — Autonomous Driving Ethics: from Trolley Problem to Ethics of Risk",
+    "Geisslinger et al. (2023) — An Ethical Trajectory Planning Algorithm for Autonomous Vehicles",
+    "Poszler et al. (2023) — Applying ethical theories to the decision-making of self-driving vehicles"
+  ]
+}

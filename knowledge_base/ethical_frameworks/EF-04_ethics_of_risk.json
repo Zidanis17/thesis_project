@@ -1,0 +1,65 @@
+{
+  "framework_id": "EF-04",
+  "name": "Ethics of Risk",
+  "title": "EF-04 — Ethics of Risk (Multi-Principle Hybrid)",
+  "source": "EF-04 — Ethics of Risk (Multi-Principle Hybrid)",
+  "alias": "Weighted Risk Distribution Hybrid",
+  "category": "ethical_frameworks",
+  "foundation": "No single risk-distribution principle is universally adequate. A defensible AV ethical framework must combine three complementary principles: Bayesian aggregate harm minimization, Equality of risk across individuals, and Maximin protection of the worst-off party. These are weighted by configurable coefficients that can be adjusted per jurisdiction or deployment context. A hard maximum acceptable risk threshold R_max ensures no individual bears intolerable risk regardless of how weights are set.",
+  "decision_logic": "Total cost = w_B * C_Bayes + w_E * C_Equality + w_M * C_Maximin + responsibility_adjustment. C_Bayes = sum of Risk_i (aggregate harm). C_Equality = variance of Risk_i across road users (distributional fairness). C_Maximin = max_i(Risk_i) (worst-case protection). Responsibility adjustment reduces the cost assigned to trajectories where a non-AV road user is behaving illegally or dangerously, preventing the AV from being penalised for others' violations. Hard constraint: Risk_i must not exceed R_max for any individual i. Select trajectory minimising total cost subject to this constraint. Weights w_B, w_E, w_M sum to 1 and are configurable per jurisdiction.",
+  "pros": [
+    "Most comprehensive ethical formalisation — integrates three complementary distributional principles",
+    "Responsibility adjustment prevents penalising the AV for dangerous behaviour by other road users",
+    "Configurable weights allow cultural and jurisdictional adaptation without changing the algorithm",
+    "EU ethical guidelines aligned — empirically validated across 2,000+ scenarios",
+    "Subsumes EF-01, equality, and EF-03 as special cases when weights are set to extremes",
+    "R_max threshold provides a safety floor ensuring no single individual bears intolerable risk"
+  ],
+  "cons": [
+    "Weight selection is unresolved — no consensus on the correct values for w_B, w_E, w_M",
+    "Complexity increases implementation burden and reduces interpretability for non-experts",
+    "Responsibility modeling is incomplete in practice — assigning blame across parties is hard",
+    "Harm quantification via delta_v to injury probability introduces uncertainty in C_Bayes",
+    "Three-component cost function makes it harder to explain a single decision in simple terms"
+  ],
+  "best_fit_scenarios": [
+    "complex urban intersections with mixed road user types and vulnerability levels",
+    "scenarios requiring balanced treatment of aggregate welfare and individual rights",
+    "policy-level deployment where explicit ethical parameter tuning is institutionally justified",
+    "mixed stakeholders with both VRUs and vehicle occupants present",
+    "jurisdictions requiring explicit documentation of the ethical framework used"
+  ],
+  "poor_fit_scenarios": [
+    "real-time embedded systems with strict computational latency constraints",
+    "scenarios where a single ethical principle clearly dominates making the hybrid unnecessary",
+    "contexts where weight transparency creates political or legal sensitivity",
+    "simple routine driving scenarios where EF-02 alone is sufficient"
+  ],
+  "tradeoffs": "vs Utilitarian (EF-01): EF-04 with w_B=1, w_E=0, w_M=0 equals EF-01 — but in practice w_E and w_M add fairness and protection terms that EF-01 ignores entirely. vs Maximin (EF-03): EF-04 with w_M=1, w_B=0, w_E=0 equals EF-03 — but hybrid weighting prevents pathological sacrifice of many for one. vs Deontological (EF-02): EF-02 defines the feasible set; EF-04 selects the best trajectory within it — they are complementary not competing. vs EVT (EF-05): EF-04 uses objective risk magnitudes; EVT adds subjective social valence weighting on top of harm — they address different dimensions.",
+  "key_parameters": [
+    "w_B weight for Bayesian aggregate component (default 0.4)",
+    "w_E weight for Equality component (default 0.3)",
+    "w_M weight for Maximin component (default 0.3)",
+    "R_max maximum acceptable risk per individual",
+    "responsibility_factor r_i per road user based on compliance with traffic rules",
+    "C_Bayes = sum Risk_i",
+    "C_Equality = variance of Risk_i",
+    "C_Maximin = max Risk_i"
+  ],
+  "scenario_tags": [
+    "urban_intersection",
+    "mixed_stakeholders",
+    "VRU_present",
+    "multi_vehicle",
+    "collision_unavoidable",
+    "hybrid_framework",
+    "risk_distribution",
+    "configurable_weights",
+    "EU_guidelines",
+    "responsibility_sensitive"
+  ],
+  "source_papers": [
+    "Geisslinger et al. (2021) — Autonomous Driving Ethics: from Trolley Problem to Ethics of Risk",
+    "Geisslinger et al. (2023) — An Ethical Trajectory Planning Algorithm for Autonomous Vehicles"
+  ]
+}

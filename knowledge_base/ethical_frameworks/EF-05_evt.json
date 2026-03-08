@@ -1,0 +1,61 @@
+{
+  "framework_id": "EF-05",
+  "name": "Ethical Valence Theory",
+  "title": "EF-05 — Ethical Valence Theory (EVT)",
+  "source": "EF-05 — Ethical Valence Theory (EVT)",
+  "alias": "Social Valence and Harm Minimization",
+  "category": "ethical_frameworks",
+  "foundation": "AV decisions must minimise expected harm AND respect socially derived valence hierarchies that reflect public moral preferences about which road users deserve priority. Combines consequentialist harm calculation with a contractualist social weighting layer derived from empirical studies of public moral intuitions. The moral profile of the AV is a transparent, configurable parameter rather than a hidden design choice.",
+  "decision_logic": "Step 1: Compute expected harm for each action using the delta-v based injury model: H_i = k * delta_v_i^2 where k is a structural vulnerability constant for the road user type. Step 2: Rank candidate actions using the valence hierarchy for the active moral profile. Altruistic profile: pedestrians rank above passengers, children above adults. Threshold-egoistic profile: protect the passenger unless the harm to third parties exceeds a configurable threshold T. Step 3: Select the action that minimises expected harm within the valence constraints. The MDP formulation allows multi-step look-ahead over short time horizons.",
+  "pros": [
+    "Integrates empirical public moral preferences rather than imposing a single philosophical view",
+    "Configurable moral profiles make the ethical stance of the AV explicit and auditable",
+    "Formally specified within MDP framework making it computationally tractable",
+    "Explicitly treats social acceptability as a first-class design criterion alongside safety",
+    "Allows manufacturers to offer different moral profiles with transparent disclosure"
+  ],
+  "cons": [
+    "Valence criteria may embed demographic discrimination by age, gender, or social status",
+    "Moral profiles must be publicly disclosed creating political and legal sensitivity",
+    "Short temporal horizon in MDP formulation may miss downstream consequences",
+    "The correct moral profile is contested — no objective criterion for choosing one",
+    "Empirical public preferences may not align with philosophical or legal ethical standards"
+  ],
+  "best_fit_scenarios": [
+    "unavoidable crash dilemmas with clearly distinct stakeholder categories such as passenger vs pedestrian",
+    "deployments requiring explicit public justification of the moral stance taken",
+    "research contexts exploring sensitivity to different moral profiles",
+    "scenarios where the social identity of road users is distinguishable and legally relevant",
+    "jurisdictions requiring manufacturers to disclose the ethical principles of their AV systems"
+  ],
+  "poor_fit_scenarios": [
+    "routine non-dilemma driving where valence hierarchy is irrelevant",
+    "scenarios without distinguishable stakeholder types",
+    "contexts where demographic weighting creates legal discrimination liability",
+    "scenarios requiring fast real-time decisions where MDP look-ahead is too slow"
+  ],
+  "tradeoffs": "vs Utilitarian (EF-01): EF-05 adds a social valence layer on top of harm minimization — EF-01 minimises raw aggregate harm without considering the social identity of those harmed. vs Maximin (EF-03): EF-05 is not purely worst-case — it balances valence hierarchy with harm magnitude, whereas EF-03 focuses only on risk magnitude. vs Ethics of Risk (EF-04): EF-04 uses objective risk metrics; EF-05 adds subjective social weighting — they are addressing different ethical dimensions and can be combined. vs Deontological (EF-02): EVT is outcome-focused; EF-02 is rule-based — EVT would choose to violate a rule if the valence-weighted outcome justifies it.",
+  "key_parameters": [
+    "delta_v impact velocity change per road user",
+    "structural_vulnerability_constant k per road user type",
+    "expected_harm H_i = k * delta_v_i^2",
+    "valence_rank V(road_user_type) from active moral profile",
+    "moral_profile: altruistic | threshold_egoistic | custom",
+    "harm_threshold T for threshold-egoistic profile",
+    "MDP_horizon number of look-ahead steps"
+  ],
+  "scenario_tags": [
+    "unavoidable_collision",
+    "passenger_vs_pedestrian",
+    "dilemma",
+    "social_valence",
+    "moral_profile",
+    "EVT",
+    "crash_dilemma",
+    "distinct_stakeholder_types",
+    "public_justification"
+  ],
+  "source_papers": [
+    "Evans et al. (2020) — Ethical Decision Making in Autonomous Vehicles: The AV Ethics Project"
+  ]
+}
