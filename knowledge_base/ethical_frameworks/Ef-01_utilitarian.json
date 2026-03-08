@@ -1,0 +1,73 @@
+{
+  "framework_id": "EF-01",
+  "name": "Utilitarian Risk Minimization",
+  "title": "EF-01 — Utilitarian Risk Minimization",
+  "source": "EF-01 — Utilitarian Risk Minimization",
+  "alias": "Bayesian Aggregate Harm Minimization",
+  "category": "ethical_frameworks",
+  "foundation": "Select the action that minimises total expected harm across all road users. Every affected individual counts equally — the interests of one person cannot be counted as worth more than the equivalent interests of another. Expected harm is computed as the probability-weighted sum of harm across all parties: EU = sum of P(collision_i) * H(harm_i). This is the direct implementation of Bentham's principle of utility applied to AV trajectory planning.",
+  "decision_logic": "Compute total expected risk for each candidate action by summing collision_probability * harm_estimate across all road users. Select the action with the lowest aggregate risk score. This is the Bayesian cost function J_B(u) = sum_i(p_i(u) * H_i(u)). Treat all road users symmetrically — no individual's harm is weighted above another's based on identity. Apply only when no deontological hard constraints have been violated, as EF-02 defines the feasible set within which EF-01 optimises.",
+  "pros": [
+    "Technically tractable — naturally implemented as a cost minimisation problem",
+    "Handles uncertainty through probability weighting",
+    "Applies across all driving situations as a universal baseline",
+    "Grounded in well-established Bayesian decision theory",
+    "Empirically measurable — risk scores are quantitative and auditable"
+  ],
+  "cons": [
+    "Treats risk to all individuals symmetrically without considering distributional fairness",
+    "Can in principle justify concentrating harm on one person if this reduces total expected harm",
+    "Pure act-utilitarian application could justify any individual sacrifice if the numbers favour it",
+    "Does not account for vulnerability differences between road user types",
+    "German Ethics Commission classifies pure utilitarian sacrifice of innocents as inadmissible"
+  ],
+  "best_fit_scenarios": [
+    "unavoidable collision dilemmas where all parties have equal vulnerability",
+    "multi-vehicle scenarios with no clearly identified worst-off party",
+    "scenarios where aggregate minimisation does not require sacrificing a vulnerable individual",
+    "baseline component in hybrid frameworks alongside equality and maximin terms"
+  ],
+  "poor_fit_scenarios": [
+    "scenarios involving clearly vulnerable individuals such as children or elderly pedestrians",
+    "any scenario where aggregate minimisation would concentrate harm on the most vulnerable party",
+    "as the sole framework — must be bounded by deontological constraints and fairness principles",
+    "routine non-dilemma driving where EF-02 governs and EF-01 is only a corroborating signal"
+  ],
+  "use_when": [
+    "collision_unavoidable is true AND all parties have roughly equal vulnerability",
+    "comparing actions within the feasible set already defined by EF-02",
+    "as a contributing framework to corroborate the risk-minimising action selected by EF-02 or EF-03",
+    "as the bayesian component weight within EF-04 substrate reasoning"
+  ],
+  "avoid_when": [
+    "as dominant_framework when collision_unavoidable is false — EF-02 governs routine driving",
+    "as sole framework when vulnerable road users are present and aggregate minimisation implies concentrating harm on them",
+    "when the lowest-aggregate-risk action diverges from the action that protects the most vulnerable individual"
+  ],
+  "dominant_when": [
+    "collision_unavoidable is true AND no VRU asymmetry exists between available actions AND aggregate minimisation is the decisive factor",
+    "all frameworks converge on the same action AND EF-02 did not eliminate any candidates AND no child, elderly, or cyclist is disproportionately at risk"
+  ],
+  "tradeoffs": "vs Deontological (EF-02): EF-01 may recommend an action that violates an RSS rule if it reduces aggregate harm — EF-02 rejects that action categorically. EF-02 defines the feasible set; EF-01 selects within it. vs Maximin (EF-03): EF-01 accepts harming a vulnerable individual if total harm is reduced; EF-03 protects the worst-off party even at cost to aggregate efficiency. vs Ethics of Risk (EF-04): EF-04 with w_B=1, w_E=0, w_M=0 equals EF-01 — in practice EF-04 adds fairness and protection terms EF-01 ignores. vs EVT (EF-05): EF-01 minimises raw aggregate harm without considering the social identity of those harmed; EF-05 adds a social valence layer on top.",
+  "key_parameters": [
+    "collision_probability p_i per road user",
+    "harm_estimate H_i per road user",
+    "risk_score R_i = p_i * H_i",
+    "total_risk = sum of R_i across all road users",
+    "best_action_by_total_risk: action minimising total_risk"
+  ],
+  "scenario_tags": [
+    "collision_unavoidable",
+    "equal_vulnerability",
+    "multi_vehicle",
+    "aggregate_harm",
+    "bayesian",
+    "utilitarian",
+    "risk_minimization"
+  ],
+  "source_papers": [
+    "Bentham, J. (1789) — An Introduction to the Principles of Morals and Legislation",
+    "Geisslinger et al. (2021) — Autonomous Driving Ethics: from Trolley Problem to Ethics of Risk",
+    "Geisslinger et al. (2023) — An Ethical Trajectory Planning Algorithm for Autonomous Vehicles"
+  ]
+}

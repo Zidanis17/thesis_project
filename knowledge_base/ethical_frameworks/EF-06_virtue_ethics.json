@@ -34,6 +34,19 @@
     "high-speed scenarios where sub-200ms decision time is required",
     "any scenario where the output must be independently verifiable"
   ],
+  "use_when": [
+    "always — EF-06 contributes natural language framing and the reasonable driver standard to any decision regardless of which formal framework is dominant",
+    "as a contributing framework to wrap and explain the output of whichever formal framework governed the decision",
+    "when the scenario is novel or ambiguous and falls outside the coverage of EF-01 through EF-05"
+  ],
+  "avoid_when": [
+    "as dominant_framework when any of EF-01, EF-02, EF-03, or EF-05 produced a clear and applicable answer — EF-06 is the fallback, not the first choice",
+    "as a substitute for formal framework reasoning in scenarios that formal frameworks cover well"
+  ],
+  "dominant_when": [
+    "no formal framework (EF-01 through EF-05) produced a clear applicable output for this scenario",
+    "the scenario is genuinely novel, ambiguous, or outside the coverage of the formal models and qualitative reasonable-driver reasoning is the only applicable basis for the decision"
+  ],
   "tradeoffs": "EF-06 does not directly compete with EF-01 through EF-05 — it operates at a different level. Rather than selecting a trajectory, it explains and contextualises the selection made by another framework. It can wrap any of EF-01 to EF-05 to produce a human-readable justification. As a fallback it provides a common-sense prior when formal frameworks cannot produce a valid output. Think of EF-01 to EF-05 as the decision engines and EF-06 as the communication and reasoning layer above them.",
   "key_parameters": [
     "scenario_context: full structured scenario description",

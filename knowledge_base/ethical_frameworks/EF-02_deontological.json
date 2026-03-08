@@ -35,6 +35,20 @@
     "scenarios requiring comparison between two harmful outcomes",
     "emergency situations where rule violation may reduce overall harm"
   ],
+  "use_when": [
+    "collision_unavoidable is false — EF-02 governs all routine non-dilemma driving",
+    "any scenario where at least one RSS-compliant trajectory exists",
+    "as the structural filter that defines the feasible action set before any other framework evaluates outcomes",
+    "always — EF-02 is a universal constraint layer that applies in every scenario type"
+  ],
+  "avoid_when": [
+    "as sole decision framework when collision_unavoidable is true and all available actions violate some constraint — in that case EF-02 mandates emergency braking but outcome comparison falls to EF-01, EF-03, or EF-05"
+  ],
+  "dominant_when": [
+    "collision_unavoidable is false — EF-02 is dominant by default in all routine non-dilemma scenarios regardless of whether other frameworks agree with the outcome",
+    "EF-02 is dominant whenever it defined which actions were in the feasible set — even if EF-01 or EF-03 would have selected the same action for their own reasons",
+    "the recommended action is the sole RSS-compliant candidate after constraint elimination"
+  ],
   "tradeoffs": "vs Utilitarian (EF-01): rejects any harm-minimising action that violates a hard rule even if it would reduce total expected harm. vs Maximin (EF-03): does not consider the welfare of the worst-off party — if protecting the most vulnerable requires a rule violation, EF-02 disallows it. vs Ethics of Risk (EF-04): acts as a hard filter before EF-04 weighted optimisation — EF-02 defines the feasible set, EF-04 selects within it. vs EVT (EF-05): rule-based, not outcome-based — social valence of road user types is irrelevant to rule compliance.",
   "key_parameters": [
     "safe_distance_min d_min based on reaction time rho and braking bounds",

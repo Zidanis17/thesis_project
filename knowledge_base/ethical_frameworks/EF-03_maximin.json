@@ -35,6 +35,20 @@
     "multi_vehicle scenarios where all parties have equal vulnerability",
     "scenarios where protecting one individual creates catastrophic harm to many others"
   ],
+  "use_when": [
+    "any obstacle has vulnerability_class of child, elderly, cyclist, or pedestrian — EF-03 is a mandatory contributing framework in all VRU-present scenarios",
+    "collision_unavoidable is true and protecting the most vulnerable individual diverges from the aggregate-minimising action",
+    "the worst-case individual risk under different actions differs significantly between a vulnerable and a non-vulnerable party"
+  ],
+  "avoid_when": [
+    "as dominant_framework when collision_unavoidable is false — EF-02 governs routine driving and EF-03 is a contributor",
+    "when all available parties have equal vulnerability and no worst-off individual is identifiable",
+    "when protecting the single worst-off party would cause catastrophic harm to a large group of equally vulnerable individuals"
+  ],
+  "dominant_when": [
+    "collision_unavoidable is true AND a clearly identified vulnerable individual (child, elderly, cyclist) is the worst-off party AND protecting them is what distinguishes the recommended action from alternatives",
+    "the maximin-optimal action differs from the aggregate-minimising action AND the maximin action is selected"
+  ],
   "tradeoffs": "vs Utilitarian (EF-01): increases total expected harm in order to protect the worst-off individual — EF-01 would accept harming the vulnerable if total harm is reduced. vs Deontological (EF-02): may select a trajectory that violates a rule if that is necessary to protect the most vulnerable — EF-02 would reject it. vs Ethics of Risk (EF-04): EF-04 includes maximin as one weighted component alongside aggregate and equality terms — EF-03 is the pure maximin extreme. vs EVT (EF-05): EF-03 focuses purely on risk magnitude without social valence weighting — EVT additionally considers the social hierarchy of road user types.",
   "key_parameters": [
     "risk_per_road_user R_i for each individual i",

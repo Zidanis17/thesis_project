@@ -87,7 +87,7 @@ def main() -> int:
 
     ingester = KnowledgeBaseIngester(**kwargs)
     try:
-        result = ingester.ingest(reset_collection=not args.append)
+        result = ingester.ingest(reset_collection=True)
     except Exception as exc:
         print(f"Ingestion failed: {exc}", file=sys.stderr)
         return 1

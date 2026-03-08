@@ -35,6 +35,17 @@
     "contexts where weight transparency creates political or legal sensitivity",
     "simple routine driving scenarios where EF-02 alone is sufficient"
   ],
+  "use_when": [
+    "always — EF-04 is the shared analytical substrate used to set weights (bayesian, equality, maximin) regardless of which framework is dominant",
+    "in contributing_frameworks whenever the three-component cost breakdown informed the reasoning",
+    "to explain how aggregate harm, distributional fairness, and worst-case protection were balanced in the final decision"
+  ],
+  "avoid_when": [
+    "as dominant_framework — EF-04 is never dominant; it is the mathematical substrate within which EF-01, EF-02, EF-03, and EF-05 operate"
+  ],
+  "dominant_when": [
+    "never — EF-04 cannot be dominant_framework; set it only in contributing_frameworks"
+  ],
   "tradeoffs": "vs Utilitarian (EF-01): EF-04 with w_B=1, w_E=0, w_M=0 equals EF-01 — but in practice w_E and w_M add fairness and protection terms that EF-01 ignores entirely. vs Maximin (EF-03): EF-04 with w_M=1, w_B=0, w_E=0 equals EF-03 — but hybrid weighting prevents pathological sacrifice of many for one. vs Deontological (EF-02): EF-02 defines the feasible set; EF-04 selects the best trajectory within it — they are complementary not competing. vs EVT (EF-05): EF-04 uses objective risk magnitudes; EVT adds subjective social valence weighting on top of harm — they address different dimensions.",
   "key_parameters": [
     "w_B weight for Bayesian aggregate component (default 0.4)",

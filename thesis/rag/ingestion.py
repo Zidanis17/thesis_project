@@ -52,6 +52,9 @@ class KnowledgeBaseIngester:
         "poor_fit_scenarios",
         "tradeoffs",
         "scenario_tags",
+        "use_when",     
+        "avoid_when",      
+        "dominant_when",   
     )
 
     JSON_RECORD_KEYS = ("documents", "cases", "scenarios", "items", "chunks")

@@ -53,25 +53,29 @@ class EthicalReasoningLLM:
     }
 
     # EF-04 is the mathematical substrate — never a dominant framework.
-    DOMINANT_FRAMEWORKS = FRAMEWORKS - {"EF-04", "EF-05", "EF-03"}
+    # FIX: EF-03 and EF-05 were incorrectly excluded — they are valid dominant frameworks.
+    DOMINANT_FRAMEWORKS = FRAMEWORKS - {"EF-04"}
 
     WEIGHT_KEYS = ("bayesian", "equality", "maximin")
 
     # Fields extracted from EKB framework JSON when compressing for context.
     # Excludes source_papers, key_parameters, embedding_text — noise for the LLM.
     FRAMEWORK_CONTEXT_FIELDS = (
-        "framework_id",
-        "name",
-        "foundation",
-        "decision_logic",
-        "pros",
-        "cons",
-        "tradeoffs",
+        "framework_id", "name", "foundation", "decision_logic",
+        "pros", "cons", "tradeoffs",
     )
-    # Added only when collision is unavoidable (scenario-relevant fit guidance).
+
+    # FIX: best_fit / poor_fit fields are always included, not only on unavoidable collisions.
+    # These fields are precisely what tells the LLM which framework governs routine scenarios.
     FRAMEWORK_FIT_FIELDS = (
         "best_fit_scenarios",
         "poor_fit_scenarios",
+    )
+    
+    FRAMEWORK_SELECTION_FIELDS = (   # ← add this
+    "use_when",
+    "avoid_when",
+    "dominant_when",
     )
 
     def __init__(
@@ -162,8 +166,9 @@ class EthicalReasoningLLM:
             "rag_context": self._rag_context_payload(rag_retrieval_result, scenario),
             "required_output_schema": {
                 "recommended_action": "string — one of available_actions",
+                # FIX: schema now matches system prompt — EF-05 restored, consistent with DOMINANT_FRAMEWORKS
                 "dominant_framework": "EF-01 | EF-02 | EF-03 | EF-05 | EF-06",
-                "contributing_frameworks": ["EF-01", "EF-04"],
+                "contributing_frameworks": ["EF-01", "EF-02", "EF-03", "EF-04"],
                 "weights": {
                     "bayesian": "number",
                     "equality": "number",
@@ -196,13 +201,9 @@ class EthicalReasoningLLM:
                 "supporting_documents": [],
             }
 
-        # Separate retrieved documents into framework entries and general knowledge.
-        # Framework entries (category == "ethical_frameworks") get full compressed content.
-        # General knowledge entries get their excerpt only.
         framework_entries: list[dict[str, Any]] = []
         supporting_docs: list[dict[str, Any]] = []
 
-        # Normal path — frameworks come through scored retrieval
         for doc in rag_retrieval_result.retrieved_documents:
             if doc.category == "ethical_frameworks":
                 framework_entries.append({
@@ -218,12 +219,11 @@ class EthicalReasoningLLM:
                     "excerpt": doc.excerpt,
                 })
 
-        # Fallback path — frameworks loaded from disk when vector store was unavailable
         for doc in rag_retrieval_result.always_included_documents:
             if doc.category == "ethical_frameworks":
                 framework_entries.append({
                     "title": doc.title,
-                    "score": None,  # no relevance score for disk-loaded fallback
+                    "score": None,
                     "content": self._compress_framework(doc.content, scenario),
                 })
 
@@ -241,29 +241,24 @@ class EthicalReasoningLLM:
         JSON entry. Drops source_papers, key_parameters, scenario_tags, embedding_text
         to stay within the token budget.
 
-        For unavoidable collision scenarios the best/poor fit fields are also included
-        because they directly inform which framework is appropriate for a dilemma.
+        FIX: best_fit_scenarios and poor_fit_scenarios are always included regardless of
+        collision_unavoidable. These fields are what tells the LLM which framework governs
+        routine non-dilemma scenarios — stripping them for collision_unavoidable=False was
+        hiding EF-02's guidance that it governs the vast majority of AV operation.
         """
         try:
             payload = json.loads(full_content)
         except (json.JSONDecodeError, TypeError):
-            # Not valid JSON (e.g. a markdown framework file) — return truncated text
             return {"raw_text": full_content[:2000]}
 
         if not isinstance(payload, dict):
             return {"raw_text": full_content[:2000]}
 
         compressed: dict[str, Any] = {}
-        for field_name in self.FRAMEWORK_CONTEXT_FIELDS:
+        for field_name in self.FRAMEWORK_CONTEXT_FIELDS + self.FRAMEWORK_FIT_FIELDS + self.FRAMEWORK_SELECTION_FIELDS:
             value = payload.get(field_name)
             if value is not None:
                 compressed[field_name] = value
-
-        if scenario.collision_unavoidable:
-            for field_name in self.FRAMEWORK_FIT_FIELDS:
-                value = payload.get(field_name)
-                if value is not None:
-                    compressed[field_name] = value
 
         return compressed
 
@@ -340,11 +335,9 @@ class EthicalReasoningLLM:
 
     def _parse_json_response(self, text: str) -> dict[str, Any]:
         stripped = text.strip()
-        # Strip markdown code fences if the model wraps output despite instructions
         if stripped.startswith("```"):
             stripped = re.sub(r"^```(?:json)?\s*", "", stripped, flags=re.IGNORECASE)
             stripped = re.sub(r"\s*```$", "", stripped)
-        # Extract the first complete JSON object
         start = stripped.find("{")
         end = stripped.rfind("}")
         if start != -1 and end != -1:
@@ -367,22 +360,20 @@ class EthicalReasoningLLM:
 
         candidate = value.strip()
 
-        # Direct match — preferred
         if candidate in self.FRAMEWORKS:
             return candidate
 
-        # Backwards-compat map for old framework names
         _LEGACY_MAP = {
-            "utilitarianism":              "EF-01",
+            "utilitarianism":                "EF-01",
             "utilitarian_risk_minimization": "EF-01",
-            "deontology":                  "EF-02",
-            "deontological_safety":        "EF-02",
-            "rawlsian_maximin":            "EF-03",
-            "maximin":                     "EF-03",
-            "ethics_of_risk":              "EF-04",
-            "ethical_valence_theory":      "EF-05",
-            "evt":                         "EF-05",
-            "virtue_ethics":               "EF-06",
+            "deontology":                    "EF-02",
+            "deontological_safety":          "EF-02",
+            "rawlsian_maximin":              "EF-03",
+            "maximin":                       "EF-03",
+            "ethics_of_risk":                "EF-04",
+            "ethical_valence_theory":        "EF-05",
+            "evt":                           "EF-05",
+            "virtue_ethics":                 "EF-06",
         }
         normalised = candidate.lower().replace(" ", "_").replace("-", "_")
         if normalised in _LEGACY_MAP:
@@ -418,6 +409,8 @@ class EthicalReasoningLLM:
         frameworks: list[str] = []
         for item in value:
             fw = self._canonical_framework(item, field_name="contributing_frameworks[]")
+            if fw == "EF-04":
+                continue
             if fw not in frameworks:
                 frameworks.append(fw)
         return frameworks
