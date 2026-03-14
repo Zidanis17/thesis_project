@@ -349,7 +349,8 @@ class DeterministicMathematicalLayer:
             ego_vehicle_risk += ego_risk
             constraint_flags.extend(stakeholder_risk.constraint_flags)
 
-        if action.startswith("swerve") and scenario.ego_vehicle.speed_kmh > scenario.environment.speed_limit_kmh:
+        # FIX 1: use "swerve" in action to also catch brake_swerve_left / brake_swerve_right
+        if "swerve" in action and scenario.ego_vehicle.speed_kmh > scenario.environment.speed_limit_kmh:
             constraint_flags.append("speeding_during_lateral_evasion")
 
         stakeholder_total_risk = sum(item.risk_score for item in stakeholder_risks)
@@ -412,7 +413,8 @@ class DeterministicMathematicalLayer:
             and collision_probability >= self.RIGHT_OF_WAY_PROBABILITY_THRESHOLD
         ):
             constraint_flags.append(f"potential_right_of_way_violation:{obstacle.id}")
-        if action.startswith("swerve") and trajectory == "crossing" and collision_probability >= 0.60:
+        # FIX 1: use "swerve" in action to also catch brake_swerve_left / brake_swerve_right
+        if "swerve" in action and trajectory == "crossing" and collision_probability >= 0.60:
             constraint_flags.append(f"high_speed_swerve_toward_crossing_stakeholder:{obstacle.id}")
 
         stakeholder_risk = StakeholderRisk(
@@ -506,16 +508,24 @@ class DeterministicMathematicalLayer:
         visibility_pressure = _clamp(
             (self.VISIBILITY_REFERENCE_M - scenario.environment.visibility_m) / self.VISIBILITY_REFERENCE_M,
         )
-        closest_obstacle_distance_m = min(obstacle.distance_m for obstacle in scenario.obstacles)
-        braking_margin_m = closest_obstacle_distance_m - scenario.ego_vehicle.braking_distance_m
+        # FIX 2: safe fallback when obstacles list is empty
+        closest_obstacle_distance_m = min(
+            (obstacle.distance_m for obstacle in scenario.obstacles),
+            default=float("inf"),
+        )
+        braking_margin_m = (
+            closest_obstacle_distance_m - scenario.ego_vehicle.braking_distance_m
+            if closest_obstacle_distance_m != float("inf")
+            else float("inf")
+        )
 
         return {
             "sensor_fusion_confidence": round(sensor_fusion_confidence, 3),
             "scene_uncertainty": round(scene_uncertainty, 3),
             "speed_limit_delta_kmh": round(speed_limit_delta_kmh, 3),
             "visibility_pressure": round(visibility_pressure, 3),
-            "closest_obstacle_distance_m": round(closest_obstacle_distance_m, 3),
-            "braking_margin_m": round(braking_margin_m, 3),
+            "closest_obstacle_distance_m": round(closest_obstacle_distance_m, 3) if closest_obstacle_distance_m != float("inf") else None,
+            "braking_margin_m": round(braking_margin_m, 3) if braking_margin_m != float("inf") else None,
         }
 
     def _compute_rule_flags(self, scenario: Scenario, global_metrics: dict[str, Any]) -> list[str]:
@@ -566,13 +576,14 @@ class DeterministicMathematicalLayer:
         scene_uncertainty = float(global_metrics["scene_uncertainty"])
         visibility_pressure = float(global_metrics["visibility_pressure"])
         unavoidable_bonus = 0.02 if collision_unavoidable and exposure >= 0.50 else 0.0
+        # FIX 3: removed redundant round() here — caller already rounds the result
         probability = exposure * zone_factor * (
             0.55 * scene_uncertainty
             + 0.25 * visibility_pressure
             + 0.05
             + unavoidable_bonus
         )
-        return round(_clamp(probability, maximum=0.40), 3)
+        return _clamp(probability, maximum=0.40)
 
     def _impact_speed_mps(self, ego_speed_kmh: float, speed_factor: float, weather: str) -> float:
         degraded_factor = min(
