@@ -113,6 +113,9 @@ class DeterministicRAGRetriever:
         # Cached once on first access — framework files rarely change between calls.
         self._always_included_cache: list[AlwaysIncludedDocument] | None = None
 
+        # FIX: Cache collection count — Chroma count() is called once and reused.
+        self._cached_collection_count: int | None = None
+
         try:
             self.vector_store = self._build_vector_store()
         except Exception as exc:
@@ -159,11 +162,16 @@ class DeterministicRAGRetriever:
 
         result_limit = min(self.top_k, indexed_chunks)
 
+        # FIX: Embed the query exactly once and reuse the vector for both searches.
+        # Previously similarity_search_with_score() embedded the query string on each
+        # call, causing two round trips to text-embedding-3-small (~3s each = ~6s total).
+        query_embedding = self.embeddings.embed_query(query)
+
         # Frameworks are prioritised — they get their own filtered search pass
         # so general chunks cannot crowd them out of the top-k.
-        framework_matches = self._ethical_framework_matches(query, indexed_chunks)
-        general_matches = self.vector_store.similarity_search_with_score(
-            query,
+        framework_matches = self._ethical_framework_matches(query_embedding, indexed_chunks)
+        general_matches = self.vector_store.similarity_search_by_vector_with_relevance_scores(
+            query_embedding,
             k=min(self.top_k + self.framework_top_k, indexed_chunks),
         )
         matches = self._merge_matches(
@@ -275,10 +283,11 @@ class DeterministicRAGRetriever:
     # ── Retrieval ─────────────────────────────────────────────────────────────
 
     def _ethical_framework_matches(
-        self, query: str, indexed_chunks: int
+        self, query_embedding: list[float], indexed_chunks: int
     ) -> list[tuple[Any, float]]:
         """
         Dedicated filtered search for ethical framework documents.
+        Accepts a pre-computed query embedding to avoid a redundant API call.
         Falls back to unfiltered search + manual category check if the
         Chroma filter raises (some versions have filter compatibility issues).
         Falls back further to loading from disk if the vector store returns nothing.
@@ -288,18 +297,18 @@ class DeterministicRAGRetriever:
 
         fetch_limit = min(max(self.framework_top_k * 4, self.framework_top_k), indexed_chunks)
 
-        # Attempt 1 — filtered search
+        # Attempt 1 — filtered search by vector
         try:
-            matches = self.vector_store.similarity_search_with_score(
-                query,
+            matches = self.vector_store.similarity_search_by_vector_with_relevance_scores(
+                query_embedding,
                 k=fetch_limit,
                 filter={"category": self.ETHICAL_FRAMEWORK_CATEGORY},
             )
         except Exception:
             # Attempt 2 — unfiltered, then manually keep only framework docs
             try:
-                all_matches = self.vector_store.similarity_search_with_score(
-                    query, k=fetch_limit * 2
+                all_matches = self.vector_store.similarity_search_by_vector_with_relevance_scores(
+                    query_embedding, k=fetch_limit * 2
                 )
                 matches = [
                     (doc, dist)
@@ -445,6 +454,10 @@ class DeterministicRAGRetriever:
                 raise RuntimeError("OPENAI_API_KEY is required for OpenAI embeddings")
             embeddings = OpenAIEmbeddings(model=self.embedding_model)
 
+        # FIX: store the resolved embeddings object back on self so retrieve()
+        # can call self.embeddings.embed_query() for the single-embedding optimisation.
+        self.embeddings = embeddings
+
         client_settings = Settings(anonymized_telemetry=False)
         client = chromadb.PersistentClient(
             path=str(self.persist_directory),
@@ -459,12 +472,19 @@ class DeterministicRAGRetriever:
         )
 
     def _collection_count(self) -> int:
+        # FIX: cache the result — the knowledge base doesn't change at runtime,
+        # so calling collection.count() on every retrieve() was pure overhead.
+        if self._cached_collection_count is not None:
+            return self._cached_collection_count
+
         if self.vector_store is None:
             return 0
         collection = getattr(self.vector_store, "_chroma_collection", None)
         if collection is None or not hasattr(collection, "count"):
             return 0
-        return int(collection.count())
+
+        self._cached_collection_count = int(collection.count())
+        return self._cached_collection_count
 
     def _to_retrieved_document(self, document: Any, distance: float) -> RetrievedDocument:
         metadata = dict(document.metadata or {})
