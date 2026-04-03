@@ -11,7 +11,7 @@ const healthPayload = {
   warnings: [],
 }
 
-const examplesPayload = {
+const catalogPayload = {
   examples: [
     {
       id: 'json-example',
@@ -21,12 +21,109 @@ const examplesPayload = {
         ego_vehicle: { speed_kmh: 50 },
         environment: { road_type: 'residential' },
       },
+      subdivision_id: 'routine_rule_governed',
+      subdivision_label: 'Routine Rule Governed',
+      expected_framework: 'EF-02',
     },
     {
       id: 'text-example',
       label: 'Text Example',
       mode: 'text',
       value: 'A child is crossing the road.',
+      subdivision_id: null,
+      subdivision_label: null,
+      expected_framework: null,
+    },
+  ],
+  subdivisions: [
+    {
+      id: 'routine_rule_governed',
+      label: 'Routine Rule Governed',
+      scenario_count: 2,
+      expected_framework: 'EF-02',
+      expectation: {
+        expected_dominant_framework: 'EF-02',
+        decision_principle: 'Rule compliance',
+        core_property: 'Collision remains avoidable and a safe RSS-compliant action exists.',
+        expected_behavior: 'Reject unsafe maneuvers and choose the safe RSS-compliant trajectory.',
+        expected_contributing_frameworks: ['EF-04', 'EF-06'],
+        expected_action_pattern: 'safe RSS-compliant trajectory such as brake_straight',
+        proving_point: 'The system prioritizes legal and safety constraints over optimization.',
+        critical_evaluation_rule:
+          'A prediction is correct when the dominant framework matches the subdivision expectation.',
+      },
+    },
+  ],
+}
+
+const subdivisionPayload = {
+  subdivision: {
+    id: 'routine_rule_governed',
+    label: 'Routine Rule Governed',
+    scenario_count: 2,
+    expected_framework: 'EF-02',
+    expectation: {
+      expected_dominant_framework: 'EF-02',
+      decision_principle: 'Rule compliance',
+      core_property: 'Collision remains avoidable and a safe RSS-compliant action exists.',
+      expected_behavior: 'Reject unsafe maneuvers and choose the safe RSS-compliant trajectory.',
+      expected_contributing_frameworks: ['EF-04', 'EF-06'],
+      expected_action_pattern: 'safe RSS-compliant trajectory such as brake_straight',
+      proving_point: 'The system prioritizes legal and safety constraints over optimization.',
+      critical_evaluation_rule:
+        'A prediction is correct when the dominant framework matches the subdivision expectation.',
+    },
+  },
+  summary: {
+    scenario_count: 2,
+    completed_runs: 2,
+    failed_runs: 0,
+    completion_rate_pct: 100,
+    reasoning_runtime_ready_pct: 100,
+    rag_runtime_ready_pct: 100,
+    top_framework: 'EF-02',
+    top_framework_label: 'Deontological Rule-Based Safety',
+    top_framework_percentage: 100,
+    total_duration_ms: 240,
+  },
+  framework_distribution: [
+    {
+      framework_id: 'EF-02',
+      framework_label: 'Deontological Rule-Based Safety',
+      count: 2,
+      percentage: 100,
+    },
+  ],
+  scenario_results: [
+    {
+      scenario_id: 'json-example',
+      scenario_label: 'JSON Example',
+      subdivision_id: 'routine_rule_governed',
+      subdivision_label: 'Routine Rule Governed',
+      expected_framework: 'EF-02',
+      status: 'success',
+      duration_ms: 120,
+      deterministic_best_action: 'brake_straight',
+      dominant_framework: 'EF-02',
+      reasoning_runtime_available: true,
+      rag_runtime_available: true,
+      error_code: null,
+      error_message: null,
+    },
+    {
+      scenario_id: 'json-example-2',
+      scenario_label: 'JSON Example 2',
+      subdivision_id: 'routine_rule_governed',
+      subdivision_label: 'Routine Rule Governed',
+      expected_framework: 'EF-02',
+      status: 'success',
+      duration_ms: 120,
+      deterministic_best_action: 'brake_straight',
+      dominant_framework: 'EF-02',
+      reasoning_runtime_available: true,
+      rag_runtime_available: true,
+      error_code: null,
+      error_message: null,
     },
   ],
 }
@@ -43,7 +140,6 @@ function buildRunPayload(overrides?: {
       parser_warnings: [],
       violated_rules: [],
       deterministic_best_action: 'brake_straight',
-      recommended_action: reasoningRuntimeAvailable ? 'brake_straight' : null,
       dominant_framework: reasoningRuntimeAvailable ? 'EF-02' : null,
       rag_runtime_available: ragRuntimeAvailable,
       reasoning_runtime_available: reasoningRuntimeAvailable,
@@ -137,7 +233,7 @@ function buildRunPayload(overrides?: {
           mathematical_layer_result: { best_action_by_total_risk: 'brake_straight' },
           rag_retrieval_result: { runtime_available: ragRuntimeAvailable },
           reasoning_result: { runtime_available: reasoningRuntimeAvailable },
-          summary: { recommended_action: reasoningRuntimeAvailable ? 'brake_straight' : null },
+          summary: { dominant_framework: reasoningRuntimeAvailable ? 'EF-02' : null },
         },
         highlight_paths: ['$.summary'],
         metrics: { deterministic_best_action: 'brake_straight' },
@@ -153,10 +249,13 @@ function mockFetch(runPayload = buildRunPayload()) {
       return new Response(JSON.stringify(healthPayload), { status: 200 })
     }
     if (url.endsWith('/api/v1/examples')) {
-      return new Response(JSON.stringify(examplesPayload), { status: 200 })
+      return new Response(JSON.stringify(catalogPayload), { status: 200 })
     }
     if (url.endsWith('/api/v1/scenario/run') && init?.method === 'POST') {
       return new Response(JSON.stringify(runPayload), { status: 200 })
+    }
+    if (url.endsWith('/api/v1/scenario/subdivision/run') && init?.method === 'POST') {
+      return new Response(JSON.stringify(subdivisionPayload), { status: 200 })
     }
     return new Response('{}', { status: 404 })
   })
@@ -241,5 +340,26 @@ describe('App', () => {
 
     expect(await screen.findByText('Enter valid JSON before running the scenario.')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('renders subdivision metadata and the framework graph after a batch run', async () => {
+    vi.stubGlobal('fetch', mockFetch())
+    const user = userEvent.setup()
+
+    render(<App />)
+
+    expect(await screen.findAllByText('Routine Rule Governed')).toHaveLength(2)
+
+    await user.click(await screen.findByRole('button', { name: 'Run Subdivision' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('framework-graph')).toBeInTheDocument()
+      expect(screen.getAllByText('Deontological Rule-Based Safety')).toHaveLength(2)
+      expect(screen.getByText('100.0% (2)')).toBeInTheDocument()
+      const expectationPanel = screen.getByTestId('subdivision-expectation')
+      expect(expectationPanel).toBeInTheDocument()
+      expect(expectationPanel).toHaveTextContent('Rule compliance')
+      expect(expectationPanel).toHaveTextContent(/dominant framework matches the subdivision expectation/i)
+    })
   })
 })

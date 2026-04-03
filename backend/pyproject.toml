@@ -31,3 +31,6 @@ dev = [
 
 [tool.setuptools.packages.find]
 include = ["thesis*"]
+
+[tool.setuptools.package-data]
+thesis = ["api/data/*.json"]

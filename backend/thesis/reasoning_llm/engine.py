@@ -23,7 +23,6 @@ class EthicalReasoningResult:
     model_name: str
     system_prompt: str
     runtime_available: bool
-    recommended_action: str | None = None
     dominant_framework: str | None = None
     contributing_frameworks: list[str] = field(default_factory=list)
     weights: dict[str, float] = field(default_factory=dict)
@@ -42,40 +41,33 @@ class EthicalReasoningLLM:
     DEFAULT_MODEL_NAME = "gpt-4o-mini"
     DEFAULT_TEMPERATURE = 0.0
 
-    # All six EKB frameworks the LLM may reference in contributing_frameworks.
     FRAMEWORKS = {
-        "EF-01",  # utilitarian_risk_minimization
-        "EF-02",  # deontological_safety
-        "EF-03",  # rawlsian_maximin
-        "EF-04",  # ethics_of_risk (substrate / contributing only)
-        "EF-05",  # ethical_valence_theory
-        "EF-06",  # virtue_ethics (explanation layer / fallback dominant)
+        "EF-01",
+        "EF-02",
+        "EF-03",
+        "EF-04",
+        "EF-05",
+        "EF-06",
     }
-
-    # EF-04 is the mathematical substrate — never a dominant framework.
-    # FIX: EF-03 and EF-05 were incorrectly excluded — they are valid dominant frameworks.
     DOMINANT_FRAMEWORKS = FRAMEWORKS - {"EF-04"}
-
     WEIGHT_KEYS = ("bayesian", "equality", "maximin")
-
-    # Fields extracted from EKB framework JSON when compressing for context.
-    # Excludes source_papers, key_parameters, embedding_text — noise for the LLM.
     FRAMEWORK_CONTEXT_FIELDS = (
-        "framework_id", "name", "foundation", "decision_logic",
-        "pros", "cons", "tradeoffs",
+        "framework_id",
+        "name",
+        "foundation",
+        "decision_logic",
+        "pros",
+        "cons",
+        "tradeoffs",
     )
-
-    # FIX: best_fit / poor_fit fields are always included, not only on unavoidable collisions.
-    # These fields are precisely what tells the LLM which framework governs routine scenarios.
     FRAMEWORK_FIT_FIELDS = (
         "best_fit_scenarios",
         "poor_fit_scenarios",
     )
-    
-    FRAMEWORK_SELECTION_FIELDS = (   # ← add this
-    "use_when",
-    "avoid_when",
-    "dominant_when",
+    FRAMEWORK_SELECTION_FIELDS = (
+        "use_when",
+        "avoid_when",
+        "dominant_when",
     )
 
     def __init__(
@@ -99,8 +91,6 @@ class EthicalReasoningLLM:
                 "Install langchain-openai and provide OPENAI_API_KEY via the process or .env."
             )
             self._runtime_error.__cause__ = exc
-
-    # ── Public API ────────────────────────────────────────────────────────────
 
     def reason(
         self,
@@ -137,8 +127,6 @@ class EthicalReasoningLLM:
             payload = self._parse_json_response(self._message_text(response))
             return self._build_result(
                 payload=payload,
-                parser_result=parser_result,
-                mathematical_layer_result=mathematical_layer_result,
                 risk_scores_per_action=risk_scores_per_action,
             )
         except Exception as exc:
@@ -149,8 +137,6 @@ class EthicalReasoningLLM:
                 risk_scores_per_action=risk_scores_per_action,
                 runtime_error=str(exc),
             )
-
-    # ── Prompt building ───────────────────────────────────────────────────────
 
     def _build_user_prompt(
         self,
@@ -166,8 +152,6 @@ class EthicalReasoningLLM:
             "mathematical_layer": mathematical_layer_result.to_dict(),
             "rag_context": self._rag_context_payload(rag_retrieval_result, scenario),
             "required_output_schema": {
-                "recommended_action": "string — one of available_actions",
-                # FIX: schema now matches system prompt — EF-05 restored, consistent with DOMINANT_FRAMEWORKS
                 "dominant_framework": "EF-01 | EF-02 | EF-03 | EF-05 | EF-06",
                 "contributing_frameworks": ["EF-01", "EF-02", "EF-03", "EF-04"],
                 "weights": {
@@ -175,16 +159,17 @@ class EthicalReasoningLLM:
                     "equality": "number",
                     "maximin": "number",
                 },
-                "weights_reasoning": "string — why these weights suit this scenario",
+                "weights_reasoning": "string - why these weights suit this scenario",
                 "risk_scores_per_action": "copy mathematical_layer.risk_score_matrix exactly",
-                "rationale": "string — cite retrieved framework_ids and their fields",
+                "rationale": "string - cite retrieved framework_ids and their fields",
                 "confidence": "number between 0 and 1",
-                "violated_constraints": "list of constraint flags for recommended_action, or []",
+                "violated_constraints": "list of input-supported constraint flags that shaped the reasoning, or []",
             },
         }
         return (
-            "Produce the final ethical decision as a JSON object.\n"
+            "Produce the final ethical analysis as a JSON object.\n"
             "Copy risk_scores_per_action from mathematical_layer.risk_score_matrix exactly.\n"
+            "Do not include a recommended_action field.\n"
             "Cite retrieved EKB framework_ids in your rationale.\n\n"
             f"{json.dumps(prompt_payload, separators=(',', ':'))}"
         )
@@ -207,26 +192,32 @@ class EthicalReasoningLLM:
 
         for doc in rag_retrieval_result.retrieved_documents:
             if doc.category == "ethical_frameworks":
-                framework_entries.append({
-                    "title": doc.title,
-                    "score": doc.score,
-                    "content": self._compress_framework(doc.full_content, scenario),
-                })
+                framework_entries.append(
+                    {
+                        "title": doc.title,
+                        "score": doc.score,
+                        "content": self._compress_framework(doc.full_content, scenario),
+                    }
+                )
             else:
-                supporting_docs.append({
-                    "title": doc.title,
-                    "category": doc.category,
-                    "score": doc.score,
-                    "excerpt": doc.excerpt,
-                })
+                supporting_docs.append(
+                    {
+                        "title": doc.title,
+                        "category": doc.category,
+                        "score": doc.score,
+                        "excerpt": doc.excerpt,
+                    }
+                )
 
         for doc in rag_retrieval_result.always_included_documents:
             if doc.category == "ethical_frameworks":
-                framework_entries.append({
-                    "title": doc.title,
-                    "score": None,
-                    "content": self._compress_framework(doc.content, scenario),
-                })
+                framework_entries.append(
+                    {
+                        "title": doc.title,
+                        "score": None,
+                        "content": self._compress_framework(doc.content, scenario),
+                    }
+                )
 
         return {
             "runtime_available": rag_retrieval_result.runtime_available,
@@ -237,16 +228,6 @@ class EthicalReasoningLLM:
         }
 
     def _compress_framework(self, full_content: str, scenario: Scenario) -> dict[str, Any]:
-        """
-        Extract only the fields the LLM needs for ethical reasoning from a framework
-        JSON entry. Drops source_papers, key_parameters, scenario_tags, embedding_text
-        to stay within the token budget.
-
-        FIX: best_fit_scenarios and poor_fit_scenarios are always included regardless of
-        collision_unavoidable. These fields are what tells the LLM which framework governs
-        routine non-dilemma scenarios — stripping them for collision_unavoidable=False was
-        hiding EF-02's guidance that it governs the vast majority of AV operation.
-        """
         try:
             payload = json.loads(full_content)
         except (json.JSONDecodeError, TypeError):
@@ -256,34 +237,23 @@ class EthicalReasoningLLM:
             return {"raw_text": full_content[:2000]}
 
         compressed: dict[str, Any] = {}
-        for field_name in self.FRAMEWORK_CONTEXT_FIELDS + self.FRAMEWORK_FIT_FIELDS + self.FRAMEWORK_SELECTION_FIELDS:
+        for field_name in (
+            self.FRAMEWORK_CONTEXT_FIELDS
+            + self.FRAMEWORK_FIT_FIELDS
+            + self.FRAMEWORK_SELECTION_FIELDS
+        ):
             value = payload.get(field_name)
             if value is not None:
                 compressed[field_name] = value
 
         return compressed
 
-    # ── Result construction ───────────────────────────────────────────────────
-
     def _build_result(
         self,
         *,
         payload: dict[str, Any],
-        parser_result: ParserResult,
-        mathematical_layer_result: MathematicalLayerResult,
         risk_scores_per_action: dict[str, dict[str, float]],
     ) -> EthicalReasoningResult:
-        scenario = parser_result.scenario
-
-        recommended_action = self._required_text(
-            payload.get("recommended_action"), "recommended_action"
-        )
-        if recommended_action not in scenario.available_actions:
-            raise ValueError(
-                f"recommended_action must be one of {scenario.available_actions}, "
-                f"got {recommended_action!r}"
-            )
-
         contributing_frameworks = self._framework_list(
             payload.get("contributing_frameworks", [])
         )
@@ -297,15 +267,15 @@ class EthicalReasoningLLM:
         )
         rationale = self._required_text(payload.get("rationale"), "rationale")
         confidence = self._confidence(payload.get("confidence"))
-        violated_constraints = self._constraints_for_action(
-            recommended_action, mathematical_layer_result
+        violated_constraints = self._string_list(
+            payload.get("violated_constraints", []),
+            field_name="violated_constraints",
         )
 
         return EthicalReasoningResult(
             model_name=self.model_name,
             system_prompt=self.system_prompt,
             runtime_available=True,
-            recommended_action=recommended_action,
             dominant_framework=dominant_framework,
             contributing_frameworks=contributing_frameworks,
             weights=weights,
@@ -315,8 +285,6 @@ class EthicalReasoningLLM:
             confidence=confidence,
             violated_constraints=violated_constraints,
         )
-
-    # ── Response parsing ──────────────────────────────────────────────────────
 
     def _message_text(self, response: Any) -> str:
         content = getattr(response, "content", response)
@@ -342,43 +310,35 @@ class EthicalReasoningLLM:
         start = stripped.find("{")
         end = stripped.rfind("}")
         if start != -1 and end != -1:
-            stripped = stripped[start: end + 1]
+            stripped = stripped[start : end + 1]
         payload = json.loads(stripped)
         if not isinstance(payload, dict):
             raise ValueError("Reasoning model output must decode to a JSON object")
         return payload
 
-    # ── Validation helpers ────────────────────────────────────────────────────
-
     def _canonical_framework(self, value: Any, *, field_name: str) -> str:
-        """
-        Normalise a framework identifier to its canonical EKB form (e.g. "EF-01").
-        Accepts both exact IDs ("EF-01") and old-style snake_case names
-        ("utilitarianism", "deontology") for backwards compatibility.
-        """
         if not isinstance(value, str) or not value.strip():
             raise ValueError(f"{field_name} must be a non-empty string")
 
         candidate = value.strip()
-
         if candidate in self.FRAMEWORKS:
             return candidate
 
-        _LEGACY_MAP = {
-            "utilitarianism":                "EF-01",
+        legacy_map = {
+            "utilitarianism": "EF-01",
             "utilitarian_risk_minimization": "EF-01",
-            "deontology":                    "EF-02",
-            "deontological_safety":          "EF-02",
-            "rawlsian_maximin":              "EF-03",
-            "maximin":                       "EF-03",
-            "ethics_of_risk":                "EF-04",
-            "ethical_valence_theory":        "EF-05",
-            "evt":                           "EF-05",
-            "virtue_ethics":                 "EF-06",
+            "deontology": "EF-02",
+            "deontological_safety": "EF-02",
+            "rawlsian_maximin": "EF-03",
+            "maximin": "EF-03",
+            "ethics_of_risk": "EF-04",
+            "ethical_valence_theory": "EF-05",
+            "evt": "EF-05",
+            "virtue_ethics": "EF-06",
         }
         normalised = candidate.lower().replace(" ", "_").replace("-", "_")
-        if normalised in _LEGACY_MAP:
-            return _LEGACY_MAP[normalised]
+        if normalised in legacy_map:
+            return legacy_map[normalised]
 
         raise ValueError(
             f"{field_name} must be one of {sorted(self.FRAMEWORKS)}, got {candidate!r}"
@@ -394,14 +354,13 @@ class EthicalReasoningLLM:
         if candidate in self.DOMINANT_FRAMEWORKS:
             return candidate
 
-        # EF-04 was given as dominant — fall back to first valid contributing framework
-        for fw in contributing_frameworks:
-            if fw in self.DOMINANT_FRAMEWORKS:
-                return fw
+        for framework in contributing_frameworks:
+            if framework in self.DOMINANT_FRAMEWORKS:
+                return framework
 
         raise ValueError(
-            f"dominant_framework cannot be EF-04 (ethics_of_risk); "
-            f"use EF-01, EF-02, EF-03, EF-05, or EF-06"
+            "dominant_framework cannot be EF-04 (ethics_of_risk); "
+            "use EF-01, EF-02, EF-03, EF-05, or EF-06"
         )
 
     def _framework_list(self, value: Any) -> list[str]:
@@ -409,11 +368,14 @@ class EthicalReasoningLLM:
             raise ValueError("contributing_frameworks must be a list")
         frameworks: list[str] = []
         for item in value:
-            fw = self._canonical_framework(item, field_name="contributing_frameworks[]")
-            if fw == "EF-04":
+            framework = self._canonical_framework(
+                item,
+                field_name="contributing_frameworks[]",
+            )
+            if framework == "EF-04":
                 continue
-            if fw not in frameworks:
-                frameworks.append(fw)
+            if framework not in frameworks:
+                frameworks.append(framework)
         return frameworks
 
     def _normalize_weights(self, value: Any) -> dict[str, float]:
@@ -434,16 +396,6 @@ class EthicalReasoningLLM:
             raise ValueError("At least one weight must be positive")
         return {key: round(raw[key] / total, 3) for key in self.WEIGHT_KEYS}
 
-    def _constraints_for_action(
-        self,
-        action: str,
-        mathematical_layer_result: MathematicalLayerResult,
-    ) -> list[str]:
-        for assessment in mathematical_layer_result.action_assessments:
-            if assessment.action == action:
-                return list(assessment.constraint_flags)
-        return []
-
     def _normalize_risk_scores(
         self,
         risk_score_matrix: dict[str, dict[str, float]],
@@ -461,6 +413,16 @@ class EthicalReasoningLLM:
             raise ValueError(f"{field_name} must be a non-empty string")
         return value.strip()
 
+    def _string_list(self, value: Any, *, field_name: str) -> list[str]:
+        if not isinstance(value, list):
+            raise ValueError(f"{field_name} must be a list")
+        items: list[str] = []
+        for entry in value:
+            if not isinstance(entry, str) or not entry.strip():
+                raise ValueError(f"{field_name} entries must be non-empty strings")
+            items.append(entry.strip())
+        return items
+
     def _confidence(self, value: Any) -> float:
         try:
             confidence = float(value)
@@ -469,8 +431,6 @@ class EthicalReasoningLLM:
         if confidence < 0 or confidence > 1:
             raise ValueError("confidence must be between 0 and 1")
         return round(confidence, 3)
-
-    # ── Client ────────────────────────────────────────────────────────────────
 
     def _build_client(self) -> Any:
         from langchain_openai import ChatOpenAI

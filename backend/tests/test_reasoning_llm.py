@@ -88,7 +88,6 @@ class FakeReasoningEngine:
             model_name="fake-model",
             system_prompt=ETHICAL_REASONING_SYSTEM_PROMPT,
             runtime_available=True,
-            recommended_action="brake_straight",
             dominant_framework="deontology",
             contributing_frameworks=["ethics_of_risk"],
             weights={"bayesian": 0.5, "equality": 0.2, "maximin": 0.3},
@@ -116,7 +115,6 @@ class ReasoningLLMTests(unittest.TestCase):
         engine._runtime_error = None
         engine.client = FakeClient(
             {
-                "recommended_action": "swerve_left",
                 "dominant_framework": "ethics_of_risk",
                 "contributing_frameworks": ["deontology", "utilitarianism"],
                 "weights": {
@@ -135,17 +133,11 @@ class ReasoningLLMTests(unittest.TestCase):
         result = engine.reason(self.parser_result, self.math_result)
 
         self.assertTrue(result.runtime_available)
-        self.assertEqual(result.recommended_action, "swerve_left")
         self.assertEqual(result.dominant_framework, "EF-02")
         self.assertEqual(result.weights, {"bayesian": 0.5, "equality": 0.25, "maximin": 0.25})
         self.assertEqual(result.risk_scores_per_action, self.math_result.risk_score_matrix)
-
-        expected_flags = next(
-            assessment.constraint_flags
-            for assessment in self.math_result.action_assessments
-            if assessment.action == "swerve_left"
-        )
-        self.assertEqual(result.violated_constraints, expected_flags)
+        self.assertFalse(hasattr(result, "recommended_action"))
+        self.assertEqual(result.violated_constraints, [])
 
     def test_pipeline_includes_reasoning_result_when_engine_is_supplied(self) -> None:
         pipeline = ScenarioPipeline(reasoning_llm=FakeReasoningEngine())
@@ -154,7 +146,7 @@ class ReasoningLLMTests(unittest.TestCase):
 
         self.assertIsNotNone(result.reasoning_result)
         assert result.reasoning_result is not None
-        self.assertEqual(result.reasoning_result.recommended_action, "brake_straight")
+        self.assertEqual(result.reasoning_result.dominant_framework, "deontology")
         self.assertIn("reasoning_result", result.to_dict())
 
 

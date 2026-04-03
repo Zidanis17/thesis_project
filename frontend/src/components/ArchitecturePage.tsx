@@ -7,7 +7,7 @@ export function ArchitecturePage() {
           <h1 className="arch-title">Pipeline Architecture</h1>
           <p className="arch-subtitle">
             End-to-end data flow from scenario ingestion through deterministic scoring,
-            RAG retrieval, and LLM ethical reasoning to the final policy output.
+            RAG retrieval, and LLM ethical reasoning to the final framework analysis output.
           </p>
         </div>
         <div className="arch-header-meta">
@@ -201,7 +201,7 @@ export function ArchitecturePage() {
         <div>③ Apply math layer: risk_score_matrix, RSS constraint flags, best_action_by_total_risk (EF-01 reference only, not default)</div>
         <div>④ Select dominant_framework via dominant_when fields — framework that shaped the decision, not the one with most numerical support</div>
         <div>⑤ Set EF-04 weights: bayesian + equality + maximin = 1.0 (reflect ethical balance of this scenario)</div>
-        <div>⑥ Recommend action — must be one of available_actions; no invented actions; no altered risk scores</div>
+        <div>⑥ Return framework-centered JSON; discuss actions only in the rationale, not as a dedicated output field</div>
       </div>
     </div>
     <div>
@@ -260,7 +260,7 @@ export function ArchitecturePage() {
   <div style="padding:10px 14px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;">
     <div style="background:var(--color-background-secondary);border-radius:8px;padding:8px 10px;">
       <div style="font-size:11px;font-weight:500;color:var(--color-text-primary);margin-bottom:3px;">Decision</div>
-      <div style="font-size:10px;color:var(--color-text-secondary);line-height:1.55;">recommended_action<br>dominant_framework<br>contributing_frameworks</div>
+      <div style="font-size:10px;color:var(--color-text-secondary);line-height:1.55;">dominant_framework<br>contributing_frameworks<br>weights_reasoning</div>
     </div>
     <div style="background:var(--color-background-secondary);border-radius:8px;padding:8px 10px;">
       <div style="font-size:11px;font-weight:500;color:var(--color-text-primary);margin-bottom:3px;">EF-04 weights</div>

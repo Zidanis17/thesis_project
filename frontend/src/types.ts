@@ -11,6 +11,33 @@ export interface ExampleItem {
   label: string
   mode: InputEditorMode
   value: string | Record<string, unknown>
+  subdivision_id?: string | null
+  subdivision_label?: string | null
+  expected_framework?: string | null
+}
+
+export interface SubdivisionExpectation {
+  expected_dominant_framework: string
+  decision_principle: string
+  core_property: string
+  expected_behavior: string
+  expected_contributing_frameworks: string[]
+  expected_action_pattern: string
+  proving_point: string
+  critical_evaluation_rule: string
+}
+
+export interface ScenarioSubdivision {
+  id: string
+  label: string
+  scenario_count: number
+  expected_framework?: string | null
+  expectation?: SubdivisionExpectation | null
+}
+
+export interface ScenarioCatalogResponse {
+  examples: ExampleItem[]
+  subdivisions: ScenarioSubdivision[]
 }
 
 export interface HealthResponse {
@@ -45,7 +72,6 @@ export interface RunSuccessResponse {
     parser_warnings: string[]
     violated_rules: string[]
     deterministic_best_action: string
-    recommended_action: string | null
     dominant_framework: string | null
     rag_runtime_available: boolean
     reasoning_runtime_available: boolean
@@ -67,3 +93,44 @@ export interface RunErrorResponse {
 export type RunEnvelope =
   | { kind: 'success'; payload: RunSuccessResponse }
   | { kind: 'error'; payload: RunErrorResponse }
+
+export interface SubdivisionFrameworkMetric {
+  framework_id: string | null
+  framework_label: string
+  count: number
+  percentage: number
+}
+
+export interface SubdivisionScenarioResult {
+  scenario_id: string
+  scenario_label: string
+  subdivision_id: string | null
+  subdivision_label: string | null
+  expected_framework: string | null
+  status: 'success' | 'error'
+  duration_ms: number
+  deterministic_best_action: string | null
+  dominant_framework: string | null
+  reasoning_runtime_available: boolean
+  rag_runtime_available: boolean
+  error_code: string | null
+  error_message: string | null
+}
+
+export interface SubdivisionRunResponse {
+  subdivision: ScenarioSubdivision
+  summary: {
+    scenario_count: number
+    completed_runs: number
+    failed_runs: number
+    completion_rate_pct: number
+    reasoning_runtime_ready_pct: number
+    rag_runtime_ready_pct: number
+    top_framework: string | null
+    top_framework_label: string | null
+    top_framework_percentage: number
+    total_duration_ms: number
+  }
+  framework_distribution: SubdivisionFrameworkMetric[]
+  scenario_results: SubdivisionScenarioResult[]
+}

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 import json
 from dataclasses import dataclass
 from time import perf_counter
@@ -24,6 +25,17 @@ __all__ = [
     "ScenarioDomainError",
     "ShowcaseRuntime",
 ]
+
+
+_FRAMEWORK_LABELS: dict[str, str] = {
+    "EF-01": "Utilitarian Risk Minimization",
+    "EF-02": "Deontological Rule-Based Safety",
+    "EF-03": "Rawlsian Maximin",
+    "EF-04": "Ethics of Risk",
+    "EF-05": "Ethical Valence Theory",
+    "EF-06": "Virtue Ethics",
+}
+_UNRESOLVED_FRAMEWORK_KEY = "__unresolved__"
 
 
 class ScenarioDomainError(ValueError):
@@ -53,7 +65,7 @@ class ShowcaseRuntime:
         self.reasoning_llm = (
             reasoning_llm
             if reasoning_llm is not None
-            else EthicalReasoningLLM(model_name="gpt-4.1-mini", temperature=0.0)
+            else EthicalReasoningLLM(model_name="gpt-5.4-mini", temperature=0.0)
         )
 
     def health_payload(self) -> dict[str, Any]:
@@ -284,13 +296,11 @@ class ShowcaseRuntime:
                 reasoning_status = "success" if reasoning_payload.get("runtime_available") else "warning"
                 if reasoning_payload.get("runtime_available"):
                     reasoning_headline = (
-                        f"Recommended {reasoning_payload.get('recommended_action')} via "
-                        f"{reasoning_payload.get('dominant_framework')}."
+                        f"Resolved dominant framework: {reasoning_payload.get('dominant_framework')}."
                     )
                 else:
                     reasoning_headline = reasoning_payload.get("runtime_error") or "Reasoning runtime unavailable."
                 reasoning_metrics = {
-                    "recommended_action": reasoning_payload.get("recommended_action"),
                     "dominant_framework": reasoning_payload.get("dominant_framework"),
                     "runtime_available": reasoning_payload.get("runtime_available", False),
                 }
@@ -298,7 +308,6 @@ class ShowcaseRuntime:
                 reasoning_payload = {
                     "runtime_available": False,
                     "runtime_error": str(exc),
-                    "recommended_action": None,
                     "dominant_framework": None,
                     "contributing_frameworks": [],
                     "weights": {},
@@ -311,7 +320,6 @@ class ShowcaseRuntime:
                 reasoning_status = "warning"
                 reasoning_headline = str(exc)
                 reasoning_metrics = {
-                    "recommended_action": None,
                     "dominant_framework": None,
                     "runtime_available": False,
                 }
@@ -364,8 +372,8 @@ class ShowcaseRuntime:
                 snapshot=completed_snapshot,
                 previous_snapshot=snapshot,
                 metrics={
-                    "recommended_action": summary_payload.get("recommended_action"),
                     "deterministic_best_action": summary_payload.get("deterministic_best_action"),
+                    "dominant_framework": summary_payload.get("dominant_framework"),
                 },
             )
         )
@@ -374,6 +382,133 @@ class ShowcaseRuntime:
             "summary": summary_payload,
             "artifacts": artifacts,
             "replay": replay,
+        }
+
+    def run_subdivision(
+        self,
+        *,
+        subdivision: dict[str, Any],
+        examples: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        subdivision_id = str(subdivision["id"])
+        if not examples:
+            raise ScenarioDomainError(
+                {
+                    "error": {
+                        "code": "unknown_subdivision",
+                        "message": f"No scenarios found for subdivision '{subdivision_id}'.",
+                    },
+                    "replay": [],
+                }
+            )
+
+        started_at = perf_counter()
+        scenario_results: list[dict[str, Any]] = []
+        framework_counts: Counter[str] = Counter()
+        completed_runs = 0
+        reasoning_runtime_ready = 0
+        rag_runtime_ready = 0
+
+        for example in examples:
+            scenario_started = perf_counter()
+            try:
+                result = self.run(example["value"], example.get("mode", "auto"))
+                summary = result["summary"]
+                duration_ms = max(1, int(round((perf_counter() - scenario_started) * 1000)))
+                dominant_framework = summary.get("dominant_framework")
+                framework_key = dominant_framework or _UNRESOLVED_FRAMEWORK_KEY
+                framework_counts[framework_key] += 1
+                completed_runs += 1
+
+                if summary.get("reasoning_runtime_available"):
+                    reasoning_runtime_ready += 1
+                if summary.get("rag_runtime_available"):
+                    rag_runtime_ready += 1
+
+                scenario_results.append(
+                    {
+                        "scenario_id": example["id"],
+                        "scenario_label": example["label"],
+                        "subdivision_id": example.get("subdivision_id"),
+                        "subdivision_label": example.get("subdivision_label"),
+                        "expected_framework": example.get("expected_framework"),
+                        "status": "success",
+                        "duration_ms": duration_ms,
+                        "deterministic_best_action": summary.get("deterministic_best_action"),
+                        "dominant_framework": dominant_framework,
+                        "reasoning_runtime_available": summary.get("reasoning_runtime_available", False),
+                        "rag_runtime_available": summary.get("rag_runtime_available", False),
+                        "error_code": None,
+                        "error_message": None,
+                    }
+                )
+            except ScenarioDomainError as exc:
+                duration_ms = max(1, int(round((perf_counter() - scenario_started) * 1000)))
+                error = exc.payload.get("error", {})
+                framework_counts[_UNRESOLVED_FRAMEWORK_KEY] += 1
+                scenario_results.append(
+                    {
+                        "scenario_id": example["id"],
+                        "scenario_label": example["label"],
+                        "subdivision_id": example.get("subdivision_id"),
+                        "subdivision_label": example.get("subdivision_label"),
+                        "expected_framework": example.get("expected_framework"),
+                        "status": "error",
+                        "duration_ms": duration_ms,
+                        "deterministic_best_action": None,
+                        "dominant_framework": None,
+                        "reasoning_runtime_available": False,
+                        "rag_runtime_available": False,
+                        "error_code": error.get("code"),
+                        "error_message": error.get("message"),
+                    }
+                )
+
+        total_scenarios = len(examples)
+        failed_runs = total_scenarios - completed_runs
+        total_duration_ms = max(1, int(round((perf_counter() - started_at) * 1000)))
+
+        framework_distribution: list[dict[str, Any]] = []
+        for framework_key, count in framework_counts.most_common():
+            framework_id = None if framework_key == _UNRESOLVED_FRAMEWORK_KEY else framework_key
+            framework_distribution.append(
+                {
+                    "framework_id": framework_id,
+                    "framework_label": (
+                        "Unresolved / Unavailable"
+                        if framework_id is None
+                        else _FRAMEWORK_LABELS.get(framework_id, framework_id)
+                    ),
+                    "count": count,
+                    "percentage": round((count / total_scenarios) * 100, 1) if total_scenarios else 0.0,
+                }
+            )
+
+        top_framework = framework_distribution[0] if framework_distribution else None
+
+        return {
+            "subdivision": {
+                **subdivision,
+                "scenario_count": total_scenarios,
+            },
+            "summary": {
+                "scenario_count": total_scenarios,
+                "completed_runs": completed_runs,
+                "failed_runs": failed_runs,
+                "completion_rate_pct": round((completed_runs / total_scenarios) * 100, 1) if total_scenarios else 0.0,
+                "reasoning_runtime_ready_pct": (
+                    round((reasoning_runtime_ready / total_scenarios) * 100, 1) if total_scenarios else 0.0
+                ),
+                "rag_runtime_ready_pct": (
+                    round((rag_runtime_ready / total_scenarios) * 100, 1) if total_scenarios else 0.0
+                ),
+                "top_framework": top_framework["framework_id"] if top_framework else None,
+                "top_framework_label": top_framework["framework_label"] if top_framework else None,
+                "top_framework_percentage": top_framework["percentage"] if top_framework else 0.0,
+                "total_duration_ms": total_duration_ms,
+            },
+            "framework_distribution": framework_distribution,
+            "scenario_results": scenario_results,
         }
 
 

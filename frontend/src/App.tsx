@@ -1,10 +1,11 @@
 import { startTransition, useEffect, useState } from 'react'
 import './App.css'
-import { fetchExamples, fetchHealth, runScenario } from './api'
+import { fetchScenarioCatalog, fetchHealth, runScenario, runSubdivision } from './api'
 import { ArtifactTabs } from './components/ArtifactTabs'
 import { StageInspector } from './components/StageInspector'
 import { StageTimeline } from './components/StageTimeline'
 import { ArchitecturePage } from './components/ArchitecturePage'
+import { SubdivisionMetricsPanel } from './components/SubdivisionMetricsPanel'
 import type {
   ArtifactTabKey,
   ExampleItem,
@@ -12,6 +13,8 @@ import type {
   InputEditorMode,
   ReplayStage,
   RunEnvelope,
+  ScenarioSubdivision,
+  SubdivisionRunResponse,
 } from './types'
 
 type AppPage = 'studio' | 'architecture'
@@ -48,33 +51,47 @@ export default function App() {
   const [page, setPage] = useState<AppPage>('studio')
   const [health, setHealth] = useState<HealthResponse | null>(null)
   const [examples, setExamples] = useState<ExampleItem[]>([])
+  const [subdivisions, setSubdivisions] = useState<ScenarioSubdivision[]>([])
+  const [selectedExampleId, setSelectedExampleId] = useState<string | null>(null)
+  const [selectedSubdivisionId, setSelectedSubdivisionId] = useState<string>('')
   const [mode, setMode] = useState<InputEditorMode>('json')
   const [jsonInput, setJsonInput] = useState('{\n  "loading": true\n}')
   const [textInput, setTextInput] = useState('')
   const [runEnvelope, setRunEnvelope] = useState<RunEnvelope | null>(null)
+  const [batchResult, setBatchResult] = useState<SubdivisionRunResponse | null>(null)
   const [activeStageIndex, setActiveStageIndex] = useState(0)
   const [selectedArtifact, setSelectedArtifact] = useState<ArtifactTabKey>(DEFAULT_ARTIFACT_TAB)
   const [loadingInitial, setLoadingInitial] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isBatchSubmitting, setIsBatchSubmitting] = useState(false)
   const [isReplaying, setIsReplaying] = useState(false)
   const [clientError, setClientError] = useState<string | null>(null)
   const [requestError, setRequestError] = useState<string | null>(null)
+  const [batchError, setBatchError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
     async function load() {
       try {
-        const [healthPayload, examplesPayload] = await Promise.all([fetchHealth(), fetchExamples()])
+        const [healthPayload, catalogPayload] = await Promise.all([fetchHealth(), fetchScenarioCatalog()])
         if (cancelled) return
         setHealth(healthPayload)
-        setExamples(examplesPayload)
-        const defaultJsonExample = examplesPayload.find((item) => item.mode === 'json')
-        const defaultTextExample = examplesPayload.find((item) => item.mode === 'text')
+        setExamples(catalogPayload.examples)
+        setSubdivisions(catalogPayload.subdivisions)
+        const defaultJsonExample = catalogPayload.examples.find((item) => item.mode === 'json')
+        const defaultTextExample = catalogPayload.examples.find((item) => item.mode === 'text')
         if (defaultJsonExample && typeof defaultJsonExample.value !== 'string') {
           setJsonInput(prettyJson(defaultJsonExample.value))
+          setSelectedExampleId(defaultJsonExample.id)
+          if (defaultJsonExample.subdivision_id) {
+            setSelectedSubdivisionId(defaultJsonExample.subdivision_id)
+          }
         }
         if (defaultTextExample && typeof defaultTextExample.value === 'string') {
           setTextInput(defaultTextExample.value)
+        }
+        if (!defaultJsonExample && catalogPayload.subdivisions[0]) {
+          setSelectedSubdivisionId(catalogPayload.subdivisions[0].id)
         }
       } catch (error) {
         if (!cancelled) {
@@ -109,10 +126,14 @@ export default function App() {
   const currentStage = getCurrentStage(runEnvelope, activeStageIndex)
   const previousStage = getPreviousStage(runEnvelope, activeStageIndex)
   const hasSuccessResult = runEnvelope?.kind === 'success'
+  const selectedExample = examples.find((example) => example.id === selectedExampleId) ?? null
+  const selectedSubdivision = subdivisions.find((subdivision) => subdivision.id === selectedSubdivisionId) ?? null
+  const isBusy = isSubmitting || isBatchSubmitting
 
   async function handleRun() {
     setClientError(null)
     setRequestError(null)
+    setBatchError(null)
     setIsSubmitting(true)
     try {
       let payload: string | Record<string, unknown>
@@ -150,19 +171,46 @@ export default function App() {
     }
   }
 
+  async function handleRunSubdivision() {
+    if (!selectedSubdivisionId) {
+      setBatchError('Select a subdivision before running the batch.')
+      return
+    }
+
+    setBatchError(null)
+    setRequestError(null)
+    setIsBatchSubmitting(true)
+    try {
+      const response = await runSubdivision(selectedSubdivisionId)
+      startTransition(() => {
+        setBatchResult(response)
+      })
+    } catch (error) {
+      setBatchError(error instanceof Error ? error.message : 'Subdivision batch request failed.')
+    } finally {
+      setIsBatchSubmitting(false)
+    }
+  }
+
   function handleReset() {
     setRunEnvelope(null)
+    setBatchResult(null)
     setActiveStageIndex(0)
     setClientError(null)
     setRequestError(null)
+    setBatchError(null)
     setSelectedArtifact(DEFAULT_ARTIFACT_TAB)
   }
 
   function handleLoadExample(example: ExampleItem) {
+    setSelectedExampleId(example.id)
     setMode(example.mode)
     setRunEnvelope(null)
     setClientError(null)
     setRequestError(null)
+    if (example.subdivision_id) {
+      setSelectedSubdivisionId(example.subdivision_id)
+    }
     if (example.mode === 'json' && typeof example.value !== 'string') {
       setJsonInput(prettyJson(example.value))
       return
@@ -177,7 +225,7 @@ export default function App() {
       setJsonInput(prettyJson(JSON.parse(jsonInput) as Record<string, unknown>))
       setClientError(null)
     } catch {
-      setClientError('Formatting failed — JSON is not valid yet.')
+      setClientError('Formatting failed - JSON is not valid yet.')
     }
   }
 
@@ -282,22 +330,76 @@ export default function App() {
                 <select
                   id="example-select"
                   className="example-select"
-                  defaultValue=""
+                  value={selectedExampleId ?? ''}
                   onChange={(e) => {
                     const found = examples.find((ex) => ex.id === e.target.value)
                     if (found) handleLoadExample(found)
-                    e.target.value = ''
                   }}
                 >
-                  <option value="" disabled>Select a scenario…</option>
+                  <option value="" disabled>Select a scenario...</option>
                   {examples.map((example) => (
                     <option key={example.id} value={example.id}>
                       [{example.mode.toUpperCase()}] {example.label}
+                      {example.subdivision_label ? ` - ${example.subdivision_label}` : ''}
                     </option>
                   ))}
                 </select>
                 <span className="select-chevron">▾</span>
               </div>
+
+              {selectedExample && (
+                <div className="catalog-meta">
+                  <span className="catalog-chip">{selectedExample.mode.toUpperCase()}</span>
+                  {selectedExample.subdivision_label && (
+                    <span className="catalog-chip accent">{selectedExample.subdivision_label}</span>
+                  )}
+                  {selectedExample.expected_framework && (
+                    <span className="catalog-chip">Expected {selectedExample.expected_framework}</span>
+                  )}
+                </div>
+              )}
+
+              {subdivisions.length > 0 && (
+                <div className="subdivision-block">
+                  <label htmlFor="subdivision-select" className="block-label">Run Subdivision</label>
+                  <p className="subdivision-help">
+                    Execute every scenario in one subdivision, wait for the batch, then compare framework percentages.
+                  </p>
+                  <div className="select-wrap">
+                    <select
+                      id="subdivision-select"
+                      className="example-select"
+                      value={selectedSubdivisionId}
+                      onChange={(e) => {
+                        setSelectedSubdivisionId(e.target.value)
+                        setBatchResult(null)
+                        setBatchError(null)
+                      }}
+                    >
+                      <option value="" disabled>Select a subdivision...</option>
+                      {subdivisions.map((subdivision) => (
+                        <option key={subdivision.id} value={subdivision.id}>
+                          {subdivision.label} ({subdivision.scenario_count})
+                        </option>
+                      ))}
+                    </select>
+                    <span className="select-chevron">▾</span>
+                  </div>
+
+                  {selectedSubdivision && (
+                    <div className="catalog-meta">
+                      <span className="catalog-chip accent">{selectedSubdivision.label}</span>
+                      <span className="catalog-chip">{selectedSubdivision.scenario_count} scenarios</span>
+                      {selectedSubdivision.expected_framework && (
+                        <span className="catalog-chip">Expected {selectedSubdivision.expected_framework}</span>
+                      )}
+                      {selectedSubdivision.expectation && (
+                        <span className="catalog-chip">{selectedSubdivision.expectation.decision_principle}</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -330,21 +432,38 @@ export default function App() {
           </div>
 
           {/* Errors */}
-          {clientError && <div className="inline-error"><span>✕</span> {clientError}</div>}
-          {requestError && <div className="inline-error"><span>✕</span> {requestError}</div>}
+          {clientError && <div className="inline-error"><span>x</span> {clientError}</div>}
+          {requestError && <div className="inline-error"><span>x</span> {requestError}</div>}
+          {batchError && <div className="inline-error"><span>x</span> {batchError}</div>}
 
-          {/* Run button */}
-          <button
-            type="button"
-            className={`run-btn ${isSubmitting ? 'loading' : ''}`}
-            onClick={handleRun}
-            disabled={isSubmitting}
-          >
-            {isSubmitting
-              ? <><span className="run-spinner" /> Processing…</>
-              : <><span className="run-icon">▶</span> Execute Pipeline</>
-            }
-          </button>
+          {/* Run buttons */}
+          <div className="run-actions">
+            <button
+              type="button"
+              aria-label="Run Scenario"
+              className={`run-btn ${isSubmitting ? 'loading' : ''}`}
+              onClick={handleRun}
+              disabled={isBusy}
+            >
+              {isSubmitting
+                ? <><span className="run-spinner" /> Processing...</>
+                : <><span className="run-icon">▶</span> Execute Pipeline</>
+              }
+            </button>
+
+            <button
+              type="button"
+              aria-label="Run Subdivision"
+              className={`run-btn secondary ${isBatchSubmitting ? 'loading' : ''}`}
+              onClick={handleRunSubdivision}
+              disabled={isBusy || !selectedSubdivisionId}
+            >
+              {isBatchSubmitting
+                ? <><span className="run-spinner" /> Processing...</>
+                : <><span className="run-icon">▦</span> Run Whole Subdivision</>
+              }
+            </button>
+          </div>
         </aside>
 
         {/* ── RIGHT: OUTPUT COLUMN ── */}
@@ -354,10 +473,6 @@ export default function App() {
           {hasSuccessResult && (
             <div className="metrics-row">
               <div className="metric-card accent">
-                <span className="metric-label">Recommended Action</span>
-                <strong className="metric-value">{runEnvelope.payload.summary.recommended_action ?? '—'}</strong>
-              </div>
-              <div className="metric-card">
                 <span className="metric-label">Deterministic Best</span>
                 <strong className="metric-value">{runEnvelope.payload.summary.deterministic_best_action}</strong>
               </div>
@@ -379,6 +494,25 @@ export default function App() {
           {hasSuccessResult && !runEnvelope.payload.summary.reasoning_runtime_available && (
             <div className="warn-bar">⚠ Reasoning degraded: {runEnvelope.payload.summary.reasoning_runtime_error}</div>
           )}
+
+          <div className="subdivision-panel">
+            <div className="panel-header">
+              <span className="panel-tag">02B</span>
+              <span className="panel-title">Subdivision Metrics</span>
+              <span className="panel-status">
+                {isBatchSubmitting
+                  ? <><span className="spin-dot" /> Processing</>
+                  : batchResult
+                  ? `${batchResult.subdivision.label} · ${batchResult.summary.top_framework_percentage}% top share`
+                  : 'Idle - awaiting batch run'}
+              </span>
+            </div>
+            <SubdivisionMetricsPanel
+              result={batchResult}
+              isLoading={isBatchSubmitting}
+              error={batchError}
+            />
+          </div>
 
           {/* Pipeline replay panel */}
           <div className="pipeline-panel">

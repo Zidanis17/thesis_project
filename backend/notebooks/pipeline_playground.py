@@ -6,7 +6,7 @@
 # - natural-language scenario -> parser -> structured scenario
 # - structured scenario -> mathematical layer -> risk matrix
 # - runtime retrieval -> prompt-ready context documents
-# - optional reasoning LLM -> final ethical recommendation
+# - optional reasoning LLM -> final ethical analysis
 #
 # Offline ingestion is intentionally out of scope here. This notebook only shows
 # runtime use of an already-indexed knowledge base.
@@ -89,7 +89,6 @@ def summarize_reasoning_result(reasoning_result):
 
     return {
         "model_name": reasoning_result.model_name,
-        "recommended_action": reasoning_result.recommended_action,
         "dominant_framework": reasoning_result.dominant_framework,
         "contributing_frameworks": reasoning_result.contributing_frameworks,
         "weights": reasoning_result.weights,

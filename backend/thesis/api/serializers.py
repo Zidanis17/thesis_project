@@ -77,7 +77,6 @@ def build_summary_payload(
         "parser_warnings": list(parser_result.warnings),
         "violated_rules": list(math_result.violated_rules),
         "deterministic_best_action": math_result.best_action_by_total_risk,
-        "recommended_action": reasoning_payload.get("recommended_action"),
         "dominant_framework": reasoning_payload.get("dominant_framework"),
         "rag_runtime_available": rag_payload.get("runtime_available", False),
         "reasoning_runtime_available": reasoning_payload.get("runtime_available", False),

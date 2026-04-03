@@ -122,7 +122,6 @@ class FakeReasoner:
                 model_name=self.model_name,
                 system_prompt="test prompt",
                 runtime_available=True,
-                recommended_action="brake_straight",
                 dominant_framework="EF-02",
                 contributing_frameworks=["EF-01", "EF-03"],
                 weights={"bayesian": 0.4, "equality": 0.2, "maximin": 0.4},
@@ -136,7 +135,6 @@ class FakeReasoner:
             model_name=self.model_name,
             system_prompt="test prompt",
             runtime_available=False,
-            recommended_action=None,
             dominant_framework=None,
             contributing_frameworks=[],
             weights={},
@@ -178,8 +176,37 @@ def test_examples_endpoint_returns_seed_examples() -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    assert len(payload["examples"]) >= 3
+    assert len(payload["examples"]) >= 101
     assert {item["mode"] for item in payload["examples"]} == {"json", "text"}
+    assert len(payload["subdivisions"]) >= 5
+    assert payload["subdivisions"][0]["scenario_count"] > 0
+    assert any(item.get("subdivision_label") for item in payload["examples"] if item["mode"] == "json")
+    assert payload["subdivisions"][0]["expectation"]["expected_dominant_framework"] == "EF-02"
+    assert payload["subdivisions"][0]["expectation"]["decision_principle"] == "Rule compliance"
+
+
+def test_subdivision_batch_run_returns_framework_distribution() -> None:
+    client = build_client()
+
+    response = client.post(
+        "/api/v1/scenario/subdivision/run",
+        json={"subdivision_id": "routine_rule_governed"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["subdivision"]["id"] == "routine_rule_governed"
+    assert payload["summary"]["scenario_count"] == 35
+    assert payload["summary"]["completed_runs"] == 35
+    assert payload["summary"]["failed_runs"] == 0
+    assert payload["summary"]["top_framework"] == "EF-02"
+    assert payload["framework_distribution"][0]["framework_id"] == "EF-02"
+    assert payload["framework_distribution"][0]["percentage"] == 100.0
+    assert payload["subdivision"]["expectation"]["expected_dominant_framework"] == "EF-02"
+    assert payload["subdivision"]["expectation"]["critical_evaluation_rule"].startswith(
+        "A prediction is correct when the dominant framework"
+    )
+    assert len(payload["scenario_results"]) == 35
 
 
 def test_json_request_returns_replay_and_artifacts() -> None:
@@ -193,7 +220,6 @@ def test_json_request_returns_replay_and_artifacts() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["summary"]["deterministic_best_action"] == "brake_straight"
-    assert payload["summary"]["recommended_action"] == "brake_straight"
     assert payload["artifacts"]["parser_result"]["_meta"]["input_mode"] == "structured_json"
     assert [stage["stage_id"] for stage in payload["replay"]] == [
         "input",
