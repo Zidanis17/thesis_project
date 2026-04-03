@@ -4,6 +4,7 @@ import { fetchExamples, fetchHealth, runScenario } from './api'
 import { ArtifactTabs } from './components/ArtifactTabs'
 import { StageInspector } from './components/StageInspector'
 import { StageTimeline } from './components/StageTimeline'
+import { ArchitecturePage } from './components/ArchitecturePage'
 import type {
   ArtifactTabKey,
   ExampleItem,
@@ -13,6 +14,8 @@ import type {
   RunEnvelope,
 } from './types'
 
+type AppPage = 'studio' | 'architecture'
+
 const DEFAULT_ARTIFACT_TAB: ArtifactTabKey = 'parser_result'
 
 function prettyJson(value: Record<string, unknown>) {
@@ -20,36 +23,29 @@ function prettyJson(value: Record<string, unknown>) {
 }
 
 function normalizeReplayDelay(durationMs: number, isFinalStage: boolean) {
-  if (isFinalStage) {
-    return 280
-  }
+  if (isFinalStage) return 280
   return Math.max(420, Math.min(1200, Math.round(durationMs * 0.85 + 240)))
 }
 
 function getCurrentStages(runEnvelope: RunEnvelope | null): ReplayStage[] {
-  if (!runEnvelope) {
-    return []
-  }
+  if (!runEnvelope) return []
   return runEnvelope.payload.replay
 }
 
 function getCurrentStage(runEnvelope: RunEnvelope | null, stageIndex: number) {
   const stages = getCurrentStages(runEnvelope)
-  if (!stages.length) {
-    return null
-  }
+  if (!stages.length) return null
   return stages[Math.min(stageIndex, stages.length - 1)]
 }
 
 function getPreviousStage(runEnvelope: RunEnvelope | null, stageIndex: number) {
   const stages = getCurrentStages(runEnvelope)
-  if (stageIndex <= 0 || !stages.length) {
-    return null
-  }
+  if (stageIndex <= 0 || !stages.length) return null
   return stages[Math.min(stageIndex - 1, stages.length - 1)]
 }
 
 export default function App() {
+  const [page, setPage] = useState<AppPage>('studio')
   const [health, setHealth] = useState<HealthResponse | null>(null)
   const [examples, setExamples] = useState<ExampleItem[]>([])
   const [mode, setMode] = useState<InputEditorMode>('json')
@@ -66,20 +62,14 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false
-
     async function load() {
       try {
         const [healthPayload, examplesPayload] = await Promise.all([fetchHealth(), fetchExamples()])
-        if (cancelled) {
-          return
-        }
-
+        if (cancelled) return
         setHealth(healthPayload)
         setExamples(examplesPayload)
-
         const defaultJsonExample = examplesPayload.find((item) => item.mode === 'json')
         const defaultTextExample = examplesPayload.find((item) => item.mode === 'text')
-
         if (defaultJsonExample && typeof defaultJsonExample.value !== 'string') {
           setJsonInput(prettyJson(defaultJsonExample.value))
         }
@@ -91,50 +81,29 @@ export default function App() {
           setRequestError(error instanceof Error ? error.message : 'Failed to load the frontend shell.')
         }
       } finally {
-        if (!cancelled) {
-          setLoadingInitial(false)
-        }
+        if (!cancelled) setLoadingInitial(false)
       }
     }
-
     void load()
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [])
 
   useEffect(() => {
     const stages = getCurrentStages(runEnvelope)
-    if (!stages.length) {
-      return
-    }
-
+    if (!stages.length) return
     let cancelled = false
     setIsReplaying(true)
-
     async function replay() {
       for (let index = 0; index < stages.length; index += 1) {
-        if (cancelled) {
-          return
-        }
-        startTransition(() => {
-          setActiveStageIndex(index)
-        })
-
+        if (cancelled) return
+        startTransition(() => { setActiveStageIndex(index) })
         const delay = normalizeReplayDelay(index === 0 ? 0 : stages[index].duration_ms, index === stages.length - 1)
         await new Promise((resolve) => window.setTimeout(resolve, delay))
       }
-
-      if (!cancelled) {
-        setIsReplaying(false)
-      }
+      if (!cancelled) setIsReplaying(false)
     }
-
     void replay()
-    return () => {
-      cancelled = true
-      setIsReplaying(false)
-    }
+    return () => { cancelled = true; setIsReplaying(false) }
   }, [runEnvelope])
 
   const currentStage = getCurrentStage(runEnvelope, activeStageIndex)
@@ -145,10 +114,8 @@ export default function App() {
     setClientError(null)
     setRequestError(null)
     setIsSubmitting(true)
-
     try {
       let payload: string | Record<string, unknown>
-
       if (mode === 'json') {
         const parsed = JSON.parse(jsonInput) as unknown
         if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
@@ -160,13 +127,12 @@ export default function App() {
       } else {
         const trimmed = textInput.trim()
         if (trimmed.length === 0) {
-          setClientError('Enter a natural-language scenario before running the pipeline.')
+          setClientError('Enter a natural-language scenario before running.')
           setIsSubmitting(false)
           return
         }
         payload = trimmed
       }
-
       const response = await runScenario(payload, mode)
       startTransition(() => {
         setRunEnvelope(response)
@@ -211,238 +177,271 @@ export default function App() {
       setJsonInput(prettyJson(JSON.parse(jsonInput) as Record<string, unknown>))
       setClientError(null)
     } catch {
-      setClientError('Formatting failed because the JSON is not valid yet.')
+      setClientError('Formatting failed — JSON is not valid yet.')
     }
   }
 
-  return (
-    <div className="app-shell">
-      <div className="grid-backdrop" />
-      <header className="hero">
-        <section className="hero-copy">
-          <p className="eyebrow">AV Ethics Pipeline Studio</p>
-          <h1>See what each stage receives, changes, and returns.</h1>
-          <p className="hero-text">
-            Run a scenario, then follow the pipeline as a clean sequence of transformations. Each replay step
-            shows the incoming snapshot, the outgoing JSON, and a plain-language explanation of what changed.
-          </p>
-          <div className="hero-points">
-            <span className="hero-pill">Structured JSON or free text</span>
-            <span className="hero-pill">Animated stage replay</span>
-            <span className="hero-pill">Before/after diff storytelling</span>
-          </div>
-        </section>
+  const statusClass = loadingInitial ? 'booting' : health?.status === 'ok' ? 'online' : 'offline'
 
-        <section className="runtime-panel">
-          <div className="section-heading">
-            <span>Runtime Overview</span>
-            <span className="runtime-status">{loadingInitial ? 'Booting' : health?.status ?? 'Offline'}</span>
-          </div>
+  return (
+    <div className="root">
+      {/* ── TOP NAVBAR ── */}
+      <nav className="navbar">
+        <div className="navbar-brand">
+          <span className="brand-icon">◈</span>
+          <span className="brand-name">AV·ETHICS</span>
+          <span className="brand-sub">Pipeline Studio</span>
+        </div>
+
+        <div className="navbar-runtime">
           {health ? (
             <>
-              <div className="runtime-grid">
-                <div className="runtime-card">
-                  <span className="runtime-label">Knowledge Base</span>
-                  <span className="runtime-value">{health.knowledge_base_path ?? 'Unavailable'}</span>
-                </div>
-                <div className="runtime-card">
-                  <span className="runtime-label">RAG</span>
-                  <span className={`runtime-value ${health.rag.runtime_available ? 'is-ready' : 'is-warning'}`}>
-                    {health.rag.runtime_available ? 'Ready' : 'Fallback mode'}
-                  </span>
-                </div>
-                <div className="runtime-card">
-                  <span className="runtime-label">Reasoning Model</span>
-                  <span className={`runtime-value ${health.reasoning.runtime_available ? 'is-ready' : 'is-warning'}`}>
-                    {health.reasoning.runtime_available
-                      ? health.reasoning.model_name ?? 'Ready'
-                      : health.reasoning.runtime_error ?? 'Unavailable'}
-                  </span>
-                </div>
+              <div className="rt-chip">
+                <span className="rt-dot" data-state={health.rag.runtime_available ? 'ok' : 'warn'} />
+                <span className="rt-label">RAG</span>
+                <span className="rt-val">{health.rag.runtime_available ? 'Ready' : 'Fallback'}</span>
               </div>
-
-              {health.warnings.length ? (
-                <div className="runtime-warnings">
-                  {health.warnings.map((warning) => (
-                    <div key={warning} className="notice notice-warning runtime-warning">
-                      {warning}
-                    </div>
-                  ))}
-                </div>
-              ) : null}
+              <div className="rt-chip">
+                <span className="rt-dot" data-state={health.reasoning.runtime_available ? 'ok' : 'warn'} />
+                <span className="rt-label">Reasoning</span>
+                <span className="rt-val">
+                  {health.reasoning.runtime_available ? (health.reasoning.model_name ?? 'Ready') : 'Degraded'}
+                </span>
+              </div>
+              <div className="rt-chip">
+                <span className="rt-dot" data-state="ok" />
+                <span className="rt-label">KB</span>
+                <span className="rt-val">{health.knowledge_base_path ?? '—'}</span>
+              </div>
             </>
           ) : (
-            <p className="empty-state">Loading backend runtime information.</p>
+            <span className="rt-loading">Connecting to runtime…</span>
           )}
-        </section>
-      </header>
 
-      <main className="workspace">
-        <section className="input-panel panel">
-          <div className="section-heading">
-            <span>Scenario Input</span>
-            <span className="artifact-caption">Clean submission workspace</span>
-          </div>
-
-          <div className="panel-intro">
-            <p className="panel-title">Prepare a scenario and replay the pipeline response below.</p>
-            <p className="panel-text">
-              Switch between JSON and natural language, load a sample, then inspect how each backend stage
-              transforms the snapshot.
-            </p>
-          </div>
-
-          <div className="mode-switcher">
+          <div className="nav-tabs">
             <button
               type="button"
-              className={`mode-button ${mode === 'json' ? 'is-selected' : ''}`}
+              className={`nav-tab ${page === 'studio' ? 'active' : ''}`}
+              onClick={() => setPage('studio')}
+            >
+              <span className="nav-tab-icon">⬡</span> Studio
+            </button>
+            <button
+              type="button"
+              className={`nav-tab ${page === 'architecture' ? 'active' : ''}`}
+              onClick={() => setPage('architecture')}
+            >
+              <span className="nav-tab-icon">◫</span> Architecture
+            </button>
+          </div>
+
+          <div className={`status-badge ${statusClass}`}>
+            <span className="status-pulse" />
+            {loadingInitial ? 'Booting' : health?.status ?? 'Offline'}
+          </div>
+        </div>
+      </nav>
+
+      {/* ── ARCHITECTURE PAGE ── */}
+      {page === 'architecture' && <ArchitecturePage />}
+
+      {/* ── STUDIO WORKSPACE ── */}
+      {page === 'studio' && (
+      <div className="workspace">
+
+        {/* ── LEFT: INPUT PANEL ── */}
+        <aside className="input-col">
+          <div className="panel-header">
+            <span className="panel-tag">01</span>
+            <span className="panel-title">Scenario Input</span>
+          </div>
+
+          {/* Mode toggle */}
+          <div className="seg-control">
+            <button
+              type="button"
+              className={`seg-btn ${mode === 'json' ? 'active' : ''}`}
               onClick={() => setMode('json')}
             >
-              Structured JSON
+              <span className="seg-icon">{ }</span> Structured JSON
             </button>
             <button
               type="button"
-              className={`mode-button ${mode === 'text' ? 'is-selected' : ''}`}
+              className={`seg-btn ${mode === 'text' ? 'active' : ''}`}
               onClick={() => setMode('text')}
             >
-              Natural Language
+              <span className="seg-icon">¶</span> Natural Language
             </button>
           </div>
 
-          <div className="example-bank">
-            <div className="subsection-heading">
-              <span>Examples</span>
-              <span>{examples.length ? 'Load a baseline and iterate' : 'No examples loaded yet'}</span>
-            </div>
-            <div className="example-strip">
-              {examples.map((example) => (
-                <button
-                  key={example.id}
-                  type="button"
-                  className="example-pill"
-                  onClick={() => handleLoadExample(example)}
+          {/* Examples dropdown */}
+          {examples.length > 0 && (
+            <div className="examples-block">
+              <label htmlFor="example-select" className="block-label">Load Example</label>
+              <div className="select-wrap">
+                <select
+                  id="example-select"
+                  className="example-select"
+                  defaultValue=""
+                  onChange={(e) => {
+                    const found = examples.find((ex) => ex.id === e.target.value)
+                    if (found) handleLoadExample(found)
+                    e.target.value = ''
+                  }}
                 >
-                  {example.label}
-                </button>
-              ))}
+                  <option value="" disabled>Select a scenario…</option>
+                  {examples.map((example) => (
+                    <option key={example.id} value={example.id}>
+                      [{example.mode.toUpperCase()}] {example.label}
+                    </option>
+                  ))}
+                </select>
+                <span className="select-chevron">▾</span>
+              </div>
             </div>
-          </div>
-
-          <div className="editor-toolbar">
-            <button type="button" className="toolbar-button" onClick={handleRun} disabled={isSubmitting}>
-              {isSubmitting ? 'Running...' : 'Run Scenario'}
-            </button>
-            {mode === 'json' ? (
-              <button type="button" className="toolbar-button ghost" onClick={handleFormatJson}>
-                Format JSON
-              </button>
-            ) : null}
-            <button type="button" className="toolbar-button ghost" onClick={handleReset}>
-              Reset View
-            </button>
-          </div>
-
-          {mode === 'json' ? (
-            <textarea
-              aria-label="Structured JSON editor"
-              className="scenario-editor"
-              value={jsonInput}
-              onChange={(event) => setJsonInput(event.target.value)}
-            />
-          ) : (
-            <textarea
-              aria-label="Natural language scenario editor"
-              className="scenario-editor"
-              value={textInput}
-              onChange={(event) => setTextInput(event.target.value)}
-            />
           )}
 
-          {clientError ? <div className="notice notice-error">{clientError}</div> : null}
-          {requestError ? <div className="notice notice-error">{requestError}</div> : null}
-        </section>
-
-        <section className="output-column">
-          {hasSuccessResult ? (
-            <section className="summary-band">
-              <article className="summary-card emphasis">
-                <span className="summary-label">Recommended Action</span>
-                <strong>{runEnvelope.payload.summary.recommended_action ?? 'Deterministic only'}</strong>
-              </article>
-              <article className="summary-card">
-                <span className="summary-label">Deterministic Best Action</span>
-                <strong>{runEnvelope.payload.summary.deterministic_best_action}</strong>
-              </article>
-              <article className="summary-card">
-                <span className="summary-label">Dominant Framework</span>
-                <strong>{runEnvelope.payload.summary.dominant_framework ?? 'Unavailable'}</strong>
-              </article>
-              <article className="summary-card">
-                <span className="summary-label">Input Mode</span>
-                <strong>{runEnvelope.payload.summary.input_mode}</strong>
-              </article>
-            </section>
-          ) : null}
-
-          {hasSuccessResult && !runEnvelope.payload.summary.rag_runtime_available ? (
-            <div className="notice notice-warning">RAG degraded: {runEnvelope.payload.summary.rag_runtime_error}</div>
-          ) : null}
-          {hasSuccessResult && !runEnvelope.payload.summary.reasoning_runtime_available ? (
-            <div className="notice notice-warning">
-              Reasoning degraded: {runEnvelope.payload.summary.reasoning_runtime_error}
+          {/* Editor */}
+          <div className="editor-wrap">
+            <div className="editor-bar">
+              <span className="editor-lang">{mode === 'json' ? 'application/json' : 'text/plain'}</span>
+              <div className="editor-actions">
+                {mode === 'json' && (
+                  <button type="button" className="ghost-btn" onClick={handleFormatJson}>Format</button>
+                )}
+                <button type="button" className="ghost-btn" onClick={handleReset}>Reset</button>
+              </div>
             </div>
-          ) : null}
+            {mode === 'json' ? (
+              <textarea
+                aria-label="Structured JSON editor"
+                className="code-editor"
+                value={jsonInput}
+                onChange={(e) => setJsonInput(e.target.value)}
+              />
+            ) : (
+              <textarea
+                aria-label="Natural language scenario editor"
+                className="code-editor natural"
+                value={textInput}
+                onChange={(e) => setTextInput(e.target.value)}
+              />
+            )}
+          </div>
 
-          <section className="output-panel panel">
-            <div className="section-heading">
-              <span>Pipeline Replay</span>
-              <span className="artifact-caption">
-                {isSubmitting ? 'Backend processing in progress' : currentStage ? `Viewing ${currentStage.label}` : 'Idle'}
+          {/* Errors */}
+          {clientError && <div className="inline-error"><span>✕</span> {clientError}</div>}
+          {requestError && <div className="inline-error"><span>✕</span> {requestError}</div>}
+
+          {/* Run button */}
+          <button
+            type="button"
+            className={`run-btn ${isSubmitting ? 'loading' : ''}`}
+            onClick={handleRun}
+            disabled={isSubmitting}
+          >
+            {isSubmitting
+              ? <><span className="run-spinner" /> Processing…</>
+              : <><span className="run-icon">▶</span> Execute Pipeline</>
+            }
+          </button>
+        </aside>
+
+        {/* ── RIGHT: OUTPUT COLUMN ── */}
+        <div className="output-col">
+
+          {/* Summary row */}
+          {hasSuccessResult && (
+            <div className="metrics-row">
+              <div className="metric-card accent">
+                <span className="metric-label">Recommended Action</span>
+                <strong className="metric-value">{runEnvelope.payload.summary.recommended_action ?? '—'}</strong>
+              </div>
+              <div className="metric-card">
+                <span className="metric-label">Deterministic Best</span>
+                <strong className="metric-value">{runEnvelope.payload.summary.deterministic_best_action}</strong>
+              </div>
+              <div className="metric-card">
+                <span className="metric-label">Dominant Framework</span>
+                <strong className="metric-value">{runEnvelope.payload.summary.dominant_framework ?? '—'}</strong>
+              </div>
+              <div className="metric-card">
+                <span className="metric-label">Input Mode</span>
+                <strong className="metric-value">{runEnvelope.payload.summary.input_mode}</strong>
+              </div>
+            </div>
+          )}
+
+          {/* Runtime warnings */}
+          {hasSuccessResult && !runEnvelope.payload.summary.rag_runtime_available && (
+            <div className="warn-bar">⚠ RAG degraded: {runEnvelope.payload.summary.rag_runtime_error}</div>
+          )}
+          {hasSuccessResult && !runEnvelope.payload.summary.reasoning_runtime_available && (
+            <div className="warn-bar">⚠ Reasoning degraded: {runEnvelope.payload.summary.reasoning_runtime_error}</div>
+          )}
+
+          {/* Pipeline replay panel */}
+          <div className="pipeline-panel">
+            <div className="panel-header">
+              <span className="panel-tag">02</span>
+              <span className="panel-title">Pipeline Replay</span>
+              <span className="panel-status">
+                {isSubmitting
+                  ? <><span className="spin-dot" /> Processing</>
+                  : currentStage
+                  ? `Stage · ${currentStage.label}`
+                  : 'Idle — awaiting run'}
               </span>
             </div>
 
-            <div className="panel-intro compact">
-              <p className="panel-title">Track the transformation from one stage to the next.</p>
-              <p className="panel-text">
-                Each step highlights the JSON paths that changed and explains the stage in plain language.
-              </p>
-            </div>
-
-            {isSubmitting ? (
-              <div className="processing-banner" data-testid="processing-banner">
-                <div className="processing-pulse" />
-                <div>
-                  <strong>Backend processing</strong>
-                  <p>The replay inspector will animate each stage as soon as the response arrives.</p>
+            {isSubmitting && (
+              <div className="proc-banner" data-testid="processing-banner">
+                <div className="proc-bar">
+                  <div className="proc-fill" />
                 </div>
+                <p>Pipeline executing — replay inspector will animate on response.</p>
               </div>
-            ) : null}
+            )}
 
-            {runEnvelope?.kind === 'error' ? (
-              <div className="notice notice-error">
-                <strong>{runEnvelope.payload.error.code}</strong>
+            {runEnvelope?.kind === 'error' && (
+              <div className="error-block">
+                <strong className="error-code">{runEnvelope.payload.error.code}</strong>
                 <p>{runEnvelope.payload.error.message}</p>
               </div>
-            ) : null}
+            )}
 
-            <StageTimeline
-              stages={getCurrentStages(runEnvelope)}
-              activeIndex={activeStageIndex}
-              isReplaying={isReplaying}
-              onSelectStage={(index) => setActiveStageIndex(index)}
-            />
-            <StageInspector currentStage={currentStage} previousStage={previousStage} isReplaying={isReplaying} />
-          </section>
+            <div className="replay-body">
+              <StageTimeline
+                stages={getCurrentStages(runEnvelope)}
+                activeIndex={activeStageIndex}
+                isReplaying={isReplaying}
+                onSelectStage={(index) => setActiveStageIndex(index)}
+              />
+              <StageInspector
+                currentStage={currentStage}
+                previousStage={previousStage}
+                isReplaying={isReplaying}
+              />
+            </div>
+          </div>
 
-          {hasSuccessResult ? (
-            <ArtifactTabs
-              selectedTab={selectedArtifact}
-              onSelectTab={setSelectedArtifact}
-              artifacts={runEnvelope.payload.artifacts}
-            />
-          ) : null}
-        </section>
-      </main>
+          {/* Artifacts */}
+          {hasSuccessResult && (
+            <div className="artifacts-panel">
+              <div className="panel-header">
+                <span className="panel-tag">03</span>
+                <span className="panel-title">Artifacts</span>
+              </div>
+              <ArtifactTabs
+                selectedTab={selectedArtifact}
+                onSelectTab={setSelectedArtifact}
+                artifacts={runEnvelope.payload.artifacts}
+              />
+            </div>
+          )}
+        </div>
+      </div>
+      )}
     </div>
   )
 }
