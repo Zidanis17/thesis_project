@@ -1,10 +1,18 @@
 import { startTransition, useEffect, useState } from 'react'
 import './App.css'
-import { fetchScenarioCatalog, fetchHealth, runScenario, runSubdivision } from './api'
+import {
+  fetchScenarioCatalog,
+  fetchHealth,
+  fetchScenarioRunById,
+  fetchScenarioRunHistory,
+  runScenario,
+  runSubdivision,
+} from './api'
 import { ArtifactTabs } from './components/ArtifactTabs'
 import { StageInspector } from './components/StageInspector'
 import { StageTimeline } from './components/StageTimeline'
 import { ArchitecturePage } from './components/ArchitecturePage'
+import { RunHistoryPanel } from './components/RunHistoryPanel'
 import { SubdivisionMetricsPanel } from './components/SubdivisionMetricsPanel'
 import type {
   ArtifactTabKey,
@@ -13,6 +21,8 @@ import type {
   InputEditorMode,
   ReplayStage,
   RunEnvelope,
+  ScenarioRunHistoryResponse,
+  ScenarioRunRecord,
   ScenarioSubdivision,
   SubdivisionRunResponse,
 } from './types'
@@ -58,26 +68,67 @@ export default function App() {
   const [jsonInput, setJsonInput] = useState('{\n  "loading": true\n}')
   const [textInput, setTextInput] = useState('')
   const [runEnvelope, setRunEnvelope] = useState<RunEnvelope | null>(null)
+  const [runHistory, setRunHistory] = useState<ScenarioRunHistoryResponse | null>(null)
   const [batchResult, setBatchResult] = useState<SubdivisionRunResponse | null>(null)
   const [activeStageIndex, setActiveStageIndex] = useState(0)
   const [selectedArtifact, setSelectedArtifact] = useState<ArtifactTabKey>(DEFAULT_ARTIFACT_TAB)
+  const [selectedHistoryRunId, setSelectedHistoryRunId] = useState<string | null>(null)
   const [loadingInitial, setLoadingInitial] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isBatchSubmitting, setIsBatchSubmitting] = useState(false)
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false)
+  const [isStoredRunLoading, setIsStoredRunLoading] = useState(false)
   const [isReplaying, setIsReplaying] = useState(false)
   const [clientError, setClientError] = useState<string | null>(null)
   const [requestError, setRequestError] = useState<string | null>(null)
   const [batchError, setBatchError] = useState<string | null>(null)
+  const [historyError, setHistoryError] = useState<string | null>(null)
+
+  async function refreshRunHistory() {
+    setIsHistoryLoading(true)
+    setHistoryError(null)
+    try {
+      const historyPayload = await fetchScenarioRunHistory()
+      startTransition(() => {
+        setRunHistory(historyPayload)
+        if (
+          selectedHistoryRunId &&
+          !historyPayload.runs.some((storedRun) => storedRun.id === selectedHistoryRunId)
+        ) {
+          setSelectedHistoryRunId(null)
+        }
+      })
+    } catch (error) {
+      setHistoryError(error instanceof Error ? error.message : 'Failed to load stored run history.')
+    } finally {
+      setIsHistoryLoading(false)
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
     async function load() {
       try {
         const [healthPayload, catalogPayload] = await Promise.all([fetchHealth(), fetchScenarioCatalog()])
+        let historyPayload: ScenarioRunHistoryResponse | null = null
+        try {
+          historyPayload = await fetchScenarioRunHistory()
+        } catch (historyLoadError) {
+          if (!cancelled) {
+            setHistoryError(
+              historyLoadError instanceof Error
+                ? historyLoadError.message
+                : 'Failed to load stored run history.',
+            )
+          }
+        }
         if (cancelled) return
         setHealth(healthPayload)
         setExamples(catalogPayload.examples)
         setSubdivisions(catalogPayload.subdivisions)
+        if (historyPayload) {
+          setRunHistory(historyPayload)
+        }
         const defaultJsonExample = catalogPayload.examples.find((item) => item.mode === 'json')
         const defaultTextExample = catalogPayload.examples.find((item) => item.mode === 'text')
         if (defaultJsonExample && typeof defaultJsonExample.value !== 'string') {
@@ -126,14 +177,16 @@ export default function App() {
   const currentStage = getCurrentStage(runEnvelope, activeStageIndex)
   const previousStage = getPreviousStage(runEnvelope, activeStageIndex)
   const hasSuccessResult = runEnvelope?.kind === 'success'
+  const currentRunRecord: ScenarioRunRecord | null = runEnvelope?.payload.run ?? null
   const selectedExample = examples.find((example) => example.id === selectedExampleId) ?? null
   const selectedSubdivision = subdivisions.find((subdivision) => subdivision.id === selectedSubdivisionId) ?? null
-  const isBusy = isSubmitting || isBatchSubmitting
+  const isBusy = isSubmitting || isBatchSubmitting || isStoredRunLoading
 
   async function handleRun() {
     setClientError(null)
     setRequestError(null)
     setBatchError(null)
+    setHistoryError(null)
     setIsSubmitting(true)
     try {
       let payload: string | Record<string, unknown>
@@ -155,8 +208,20 @@ export default function App() {
         payload = trimmed
       }
       const response = await runScenario(payload, mode)
+      let historyPayload: ScenarioRunHistoryResponse | null = null
+      try {
+        historyPayload = await fetchScenarioRunHistory()
+        setHistoryError(null)
+      } catch (historyLoadError) {
+        setHistoryError(
+          historyLoadError instanceof Error ? historyLoadError.message : 'Failed to refresh stored run history.',
+        )
+      }
       startTransition(() => {
         setRunEnvelope(response)
+        if (historyPayload) {
+          setRunHistory(historyPayload)
+        }
         setActiveStageIndex(0)
         setSelectedArtifact(DEFAULT_ARTIFACT_TAB)
       })
@@ -192,6 +257,25 @@ export default function App() {
     }
   }
 
+  async function handleLoadStoredRun(runId: string) {
+    setHistoryError(null)
+    setRequestError(null)
+    setSelectedHistoryRunId(runId)
+    setIsStoredRunLoading(true)
+    try {
+      const storedRun = await fetchScenarioRunById(runId)
+      startTransition(() => {
+        setRunEnvelope(storedRun)
+        setActiveStageIndex(0)
+        setSelectedArtifact(DEFAULT_ARTIFACT_TAB)
+      })
+    } catch (error) {
+      setHistoryError(error instanceof Error ? error.message : 'Failed to load the stored run.')
+    } finally {
+      setIsStoredRunLoading(false)
+    }
+  }
+
   function handleReset() {
     setRunEnvelope(null)
     setBatchResult(null)
@@ -199,6 +283,7 @@ export default function App() {
     setClientError(null)
     setRequestError(null)
     setBatchError(null)
+    setHistoryError(null)
     setSelectedArtifact(DEFAULT_ARTIFACT_TAB)
   }
 
@@ -494,6 +579,31 @@ export default function App() {
           {hasSuccessResult && !runEnvelope.payload.summary.reasoning_runtime_available && (
             <div className="warn-bar">⚠ Reasoning degraded: {runEnvelope.payload.summary.reasoning_runtime_error}</div>
           )}
+
+          <div className="history-panel">
+            <div className="panel-header">
+              <span className="panel-tag">02A</span>
+              <span className="panel-title">Run History</span>
+              <span className="panel-status">
+                {isHistoryLoading
+                  ? <><span className="spin-dot" /> Refreshing</>
+                  : runHistory
+                  ? `${runHistory.total_runs} stored run${runHistory.total_runs === 1 ? '' : 's'}`
+                  : 'Idle - awaiting stored runs'}
+              </span>
+            </div>
+            <RunHistoryPanel
+              history={runHistory}
+              isLoading={isHistoryLoading}
+              isHydrating={isStoredRunLoading}
+              error={historyError}
+              selectedRunId={selectedHistoryRunId}
+              currentRun={currentRunRecord}
+              onRefresh={() => { void refreshRunHistory() }}
+              onSelectRun={setSelectedHistoryRunId}
+              onLoadRun={(runId) => { void handleLoadStoredRun(runId) }}
+            />
+          </div>
 
           <div className="subdivision-panel">
             <div className="panel-header">

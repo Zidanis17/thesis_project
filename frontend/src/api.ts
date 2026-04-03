@@ -3,6 +3,7 @@ import type {
   InputEditorMode,
   RunEnvelope,
   RunErrorResponse,
+  ScenarioRunHistoryResponse,
   RunSuccessResponse,
   ScenarioCatalogResponse,
   SubdivisionRunResponse,
@@ -54,6 +55,28 @@ export async function runScenario(
   }
 
   throw new Error(`Backend request failed with status ${response.status}.`)
+}
+
+export async function fetchScenarioRunHistory(limit = 25): Promise<ScenarioRunHistoryResponse> {
+  const response = await fetch(`${API_BASE}/api/v1/scenario/runs?limit=${limit}`)
+  if (!response.ok) {
+    throw new Error('Failed to load stored run history.')
+  }
+  return readJson<ScenarioRunHistoryResponse>(response)
+}
+
+export async function fetchScenarioRunById(runId: string): Promise<RunEnvelope> {
+  const response = await fetch(`${API_BASE}/api/v1/scenario/runs/${runId}`)
+  if (!response.ok) {
+    const payload = await readJson<{ error?: { message?: string } }>(response)
+    throw new Error(payload.error?.message ?? `Stored run request failed with status ${response.status}.`)
+  }
+
+  const payload = await readJson<RunSuccessResponse | RunErrorResponse>(response)
+  if (payload.run.status === 'error') {
+    return { kind: 'error', payload: payload as RunErrorResponse }
+  }
+  return { kind: 'success', payload: payload as RunSuccessResponse }
 }
 
 export async function runSubdivision(subdivisionId: string): Promise<SubdivisionRunResponse> {

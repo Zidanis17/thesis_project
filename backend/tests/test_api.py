@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from tempfile import mkdtemp
 
 from fastapi.testclient import TestClient
 
 from thesis import EthicalReasoningResult
 from thesis.api import ShowcaseRuntime, create_app
+from thesis.api.storage import ScenarioRunStore
 from thesis.rag import RAGRetrievalResult, RetrievedDocument
 
 
@@ -152,7 +154,8 @@ def build_client(*, rag_available: bool = True, reasoning_available: bool = True
         rag_retriever=FakeRetriever(available=rag_available),
         reasoning_llm=FakeReasoner(available=reasoning_available),
     )
-    return TestClient(create_app(runtime=runtime))
+    run_store = ScenarioRunStore(Path(mkdtemp()) / "scenario_runs.sqlite3")
+    return TestClient(create_app(runtime=runtime, run_store=run_store))
 
 
 def test_health_reports_backend_paths_after_repo_split() -> None:
@@ -219,6 +222,8 @@ def test_json_request_returns_replay_and_artifacts() -> None:
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload["run"]["status"] == "success"
+    assert payload["run"]["model_name"] == "fake-ethical-model"
     assert payload["summary"]["deterministic_best_action"] == "brake_straight"
     assert payload["artifacts"]["parser_result"]["_meta"]["input_mode"] == "structured_json"
     assert [stage["stage_id"] for stage in payload["replay"]] == [
@@ -259,6 +264,7 @@ def test_parser_validation_error_returns_400_with_partial_replay() -> None:
 
     assert response.status_code == 400
     payload = response.json()
+    assert payload["run"]["status"] == "error"
     assert payload["error"]["code"] == "scenario_parse_error"
     assert [stage["stage_id"] for stage in payload["replay"]] == ["input", "parser"]
     assert payload["replay"][-1]["status"] == "error"
@@ -293,3 +299,67 @@ def test_reasoning_unavailable_is_warning_not_failure() -> None:
     assert payload["replay"][4]["status"] == "warning"
     assert payload["summary"]["reasoning_runtime_available"] is False
     assert payload["replay"][-1]["status"] == "success"
+
+
+def test_scenario_runs_are_persisted_and_fetchable() -> None:
+    client = build_client()
+
+    run_response = client.post(
+        "/api/v1/scenario/run",
+        json={"input": build_sample_payload(), "input_mode_hint": "json"},
+    )
+
+    assert run_response.status_code == 200
+    run_payload = run_response.json()
+    run_id = run_payload["run"]["id"]
+
+    history_response = client.get("/api/v1/scenario/runs")
+
+    assert history_response.status_code == 200
+    history_payload = history_response.json()
+    assert history_payload["total_runs"] == 1
+    assert history_payload["success_runs"] == 1
+    assert history_payload["failed_runs"] == 0
+    assert history_payload["runs"][0]["id"] == run_id
+    assert history_payload["runs"][0]["dominant_framework"] == "EF-02"
+
+    detail_response = client.get(f"/api/v1/scenario/runs/{run_id}")
+
+    assert detail_response.status_code == 200
+    detail_payload = detail_response.json()
+    assert detail_payload["run"]["id"] == run_id
+    assert detail_payload["summary"]["deterministic_best_action"] == "brake_straight"
+    assert detail_payload["input"]["ego_vehicle"]["speed_kmh"] == 60
+
+
+def test_failed_runs_are_persisted_in_history() -> None:
+    client = build_client()
+
+    run_response = client.post(
+        "/api/v1/scenario/run",
+        json={
+            "input": {"environment": {"road_type": "residential"}, "obstacles": [{"type": "vehicle", "distance_m": 10}]},
+            "input_mode_hint": "json",
+        },
+    )
+
+    assert run_response.status_code == 400
+    run_payload = run_response.json()
+    run_id = run_payload["run"]["id"]
+
+    history_response = client.get("/api/v1/scenario/runs")
+
+    assert history_response.status_code == 200
+    history_payload = history_response.json()
+    assert history_payload["total_runs"] == 1
+    assert history_payload["success_runs"] == 0
+    assert history_payload["failed_runs"] == 1
+    assert history_payload["runs"][0]["id"] == run_id
+    assert history_payload["runs"][0]["error_code"] == "scenario_parse_error"
+
+    detail_response = client.get(f"/api/v1/scenario/runs/{run_id}")
+
+    assert detail_response.status_code == 200
+    detail_payload = detail_response.json()
+    assert detail_payload["run"]["status"] == "error"
+    assert detail_payload["error"]["code"] == "scenario_parse_error"

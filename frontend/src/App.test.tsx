@@ -128,19 +128,64 @@ const subdivisionPayload = {
   ],
 }
 
+function buildRunRecord(overrides?: {
+  id?: string
+  createdAt?: string
+  status?: 'success' | 'error'
+  inputPreview?: string
+  bestAction?: string | null
+  dominantFramework?: string | null
+  ragRuntimeAvailable?: boolean
+  reasoningRuntimeAvailable?: boolean
+}) {
+  return {
+    id: overrides?.id ?? 'run-001',
+    created_at: overrides?.createdAt ?? '2026-04-03T19:30:00Z',
+    status: overrides?.status ?? 'success',
+    input_mode_hint: 'json',
+    resolved_input_mode: 'structured_json',
+    submitted_kind: 'json',
+    input_preview: overrides?.inputPreview ?? 'Stored scenario preview',
+    model_name: 'gpt-5.4-mini',
+    deterministic_best_action: overrides?.bestAction ?? 'brake_straight',
+    dominant_framework: overrides?.dominantFramework ?? 'EF-02',
+    rag_runtime_available: overrides?.ragRuntimeAvailable ?? true,
+    reasoning_runtime_available: overrides?.reasoningRuntimeAvailable ?? true,
+    error_code: null,
+    error_message: null,
+    replay_stage_count: 6,
+  }
+}
+
 function buildRunPayload(overrides?: {
+  runId?: string
+  createdAt?: string
+  inputPreview?: string
+  bestAction?: string
+  dominantFramework?: string | null
   ragRuntimeAvailable?: boolean
   reasoningRuntimeAvailable?: boolean
 }) {
   const ragRuntimeAvailable = overrides?.ragRuntimeAvailable ?? true
   const reasoningRuntimeAvailable = overrides?.reasoningRuntimeAvailable ?? true
+  const bestAction = overrides?.bestAction ?? 'brake_straight'
+  const dominantFramework = overrides?.dominantFramework ?? (reasoningRuntimeAvailable ? 'EF-02' : null)
   return {
+    run: buildRunRecord({
+      id: overrides?.runId,
+      createdAt: overrides?.createdAt,
+      inputPreview: overrides?.inputPreview,
+      bestAction,
+      dominantFramework,
+      ragRuntimeAvailable,
+      reasoningRuntimeAvailable,
+    }),
     summary: {
       input_mode: 'structured_json',
       parser_warnings: [],
       violated_rules: [],
-      deterministic_best_action: 'brake_straight',
-      dominant_framework: reasoningRuntimeAvailable ? 'EF-02' : null,
+      deterministic_best_action: bestAction,
+      dominant_framework: dominantFramework,
       rag_runtime_available: ragRuntimeAvailable,
       reasoning_runtime_available: reasoningRuntimeAvailable,
       reasoning_runtime_error: reasoningRuntimeAvailable ? null : 'Reasoning unavailable',
@@ -185,10 +230,10 @@ function buildRunPayload(overrides?: {
         snapshot: {
           input: { submitted_kind: 'json' },
           parser_result: { environment: { road_type: 'residential' } },
-          mathematical_layer_result: { best_action_by_total_risk: 'brake_straight' },
+          mathematical_layer_result: { best_action_by_total_risk: bestAction },
         },
         highlight_paths: ['$.mathematical_layer_result'],
-        metrics: { best_action: 'brake_straight' },
+        metrics: { best_action: bestAction },
       },
       {
         stage_id: 'rag',
@@ -199,7 +244,7 @@ function buildRunPayload(overrides?: {
         snapshot: {
           input: { submitted_kind: 'json' },
           parser_result: { environment: { road_type: 'residential' } },
-          mathematical_layer_result: { best_action_by_total_risk: 'brake_straight' },
+          mathematical_layer_result: { best_action_by_total_risk: bestAction },
           rag_retrieval_result: { runtime_available: ragRuntimeAvailable },
         },
         highlight_paths: ['$.rag_retrieval_result'],
@@ -214,7 +259,7 @@ function buildRunPayload(overrides?: {
         snapshot: {
           input: { submitted_kind: 'json' },
           parser_result: { environment: { road_type: 'residential' } },
-          mathematical_layer_result: { best_action_by_total_risk: 'brake_straight' },
+          mathematical_layer_result: { best_action_by_total_risk: bestAction },
           rag_retrieval_result: { runtime_available: ragRuntimeAvailable },
           reasoning_result: { runtime_available: reasoningRuntimeAvailable },
         },
@@ -230,19 +275,42 @@ function buildRunPayload(overrides?: {
         snapshot: {
           input: { submitted_kind: 'json' },
           parser_result: { environment: { road_type: 'residential' } },
-          mathematical_layer_result: { best_action_by_total_risk: 'brake_straight' },
+          mathematical_layer_result: { best_action_by_total_risk: bestAction },
           rag_retrieval_result: { runtime_available: ragRuntimeAvailable },
           reasoning_result: { runtime_available: reasoningRuntimeAvailable },
-          summary: { dominant_framework: reasoningRuntimeAvailable ? 'EF-02' : null },
+          summary: { dominant_framework: dominantFramework },
         },
         highlight_paths: ['$.summary'],
-        metrics: { deterministic_best_action: 'brake_straight' },
+        metrics: { deterministic_best_action: bestAction },
       },
     ],
   }
 }
 
-function mockFetch(runPayload = buildRunPayload()) {
+const latestRunPayload = buildRunPayload({
+  runId: 'run-001',
+  createdAt: '2026-04-03T19:30:00Z',
+  inputPreview: 'Current stored JSON scenario',
+  bestAction: 'brake_straight',
+  dominantFramework: 'EF-02',
+})
+
+const olderRunPayload = buildRunPayload({
+  runId: 'run-000',
+  createdAt: '2026-04-02T09:15:00Z',
+  inputPreview: 'Earlier crossing scenario with a different outcome',
+  bestAction: 'swerve_left',
+  dominantFramework: 'EF-03',
+})
+
+const runHistoryPayload = {
+  runs: [latestRunPayload.run, olderRunPayload.run],
+  total_runs: 2,
+  success_runs: 2,
+  failed_runs: 0,
+}
+
+function mockFetch(runPayload = latestRunPayload) {
   return vi.fn(async (input: string | URL | RequestInfo, init?: RequestInit) => {
     const url = String(input)
     if (url.endsWith('/api/v1/health')) {
@@ -250,6 +318,15 @@ function mockFetch(runPayload = buildRunPayload()) {
     }
     if (url.endsWith('/api/v1/examples')) {
       return new Response(JSON.stringify(catalogPayload), { status: 200 })
+    }
+    if (url.includes('/api/v1/scenario/runs?')) {
+      return new Response(JSON.stringify(runHistoryPayload), { status: 200 })
+    }
+    if (url.endsWith('/api/v1/scenario/runs/run-001')) {
+      return new Response(JSON.stringify(latestRunPayload), { status: 200 })
+    }
+    if (url.endsWith('/api/v1/scenario/runs/run-000')) {
+      return new Response(JSON.stringify(olderRunPayload), { status: 200 })
     }
     if (url.endsWith('/api/v1/scenario/run') && init?.method === 'POST') {
       return new Response(JSON.stringify(runPayload), { status: 200 })
@@ -339,7 +416,7 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Run Scenario' }))
 
     expect(await screen.findByText('Enter valid JSON before running the scenario.')).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 
   it('renders subdivision metadata and the framework graph after a batch run', async () => {
@@ -360,6 +437,34 @@ describe('App', () => {
       expect(expectationPanel).toBeInTheDocument()
       expect(expectationPanel).toHaveTextContent('Rule compliance')
       expect(expectationPanel).toHaveTextContent(/dominant framework matches the subdivision expectation/i)
+    })
+  })
+
+  it('shows stored run history, compares a prior run, and loads it back into the replay view', async () => {
+    vi.stubGlobal('fetch', mockFetch())
+    const user = userEvent.setup()
+
+    render(<App />)
+
+    await user.click(await screen.findByRole('button', { name: 'Run Scenario' }))
+
+    const historyList = await screen.findByTestId('run-history-list')
+    expect(within(historyList).getByText('Current stored JSON scenario')).toBeInTheDocument()
+    expect(within(historyList).getByText('Earlier crossing scenario with a different outcome')).toBeInTheDocument()
+
+    const compareButtons = within(historyList).getAllByRole('button', { name: 'Compare' })
+    await user.click(compareButtons[1])
+
+    expect(await screen.findByText(/Deterministic action changed from swerve_left to brake_straight/i)).toBeInTheDocument()
+    expect(screen.getByText(/Dominant framework changed from EF-03 to EF-02/i)).toBeInTheDocument()
+    expect(screen.getAllByText('swerve_left')).toHaveLength(2)
+
+    const loadButtons = within(historyList).getAllByRole('button', { name: 'Load' })
+    await user.click(loadButtons[1])
+
+    await waitFor(() => {
+      expect(screen.getAllByText('swerve_left').length).toBeGreaterThan(2)
+      expect(screen.getAllByText('EF-03').length).toBeGreaterThan(2)
     })
   })
 })

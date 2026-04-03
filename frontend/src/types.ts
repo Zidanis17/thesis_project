@@ -1,5 +1,6 @@
 export type InputEditorMode = 'json' | 'text'
 export type StageStatus = 'success' | 'warning' | 'skipped' | 'error'
+export type RunStatus = 'success' | 'error'
 export type ArtifactTabKey =
   | 'parser_result'
   | 'mathematical_layer_result'
@@ -66,7 +67,26 @@ export interface ReplayStage {
   metrics: Record<string, unknown>
 }
 
+export interface ScenarioRunRecord {
+  id: string
+  created_at: string
+  status: RunStatus
+  input_mode_hint: InputEditorMode | 'auto'
+  resolved_input_mode: string | null
+  submitted_kind: 'json' | 'text'
+  input_preview: string
+  model_name: string | null
+  deterministic_best_action: string | null
+  dominant_framework: string | null
+  rag_runtime_available: boolean
+  reasoning_runtime_available: boolean
+  error_code: string | null
+  error_message: string | null
+  replay_stage_count: number
+}
+
 export interface RunSuccessResponse {
+  run: ScenarioRunRecord
   summary: {
     input_mode: string
     parser_warnings: string[]
@@ -83,6 +103,7 @@ export interface RunSuccessResponse {
 }
 
 export interface RunErrorResponse {
+  run: ScenarioRunRecord
   error: {
     code: string
     message: string
@@ -93,6 +114,13 @@ export interface RunErrorResponse {
 export type RunEnvelope =
   | { kind: 'success'; payload: RunSuccessResponse }
   | { kind: 'error'; payload: RunErrorResponse }
+
+export interface ScenarioRunHistoryResponse {
+  runs: ScenarioRunRecord[]
+  total_runs: number
+  success_runs: number
+  failed_runs: number
+}
 
 export interface SubdivisionFrameworkMetric {
   framework_id: string | null
