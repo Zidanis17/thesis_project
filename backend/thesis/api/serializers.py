@@ -1,0 +1,95 @@
+from __future__ import annotations
+
+from typing import Any
+
+from ..pipeline import ScenarioPipelineResult
+
+__all__ = [
+    "build_summary_payload",
+    "coerce_input_snapshot",
+    "summarize_rag_result",
+    "summarize_reasoning_result",
+]
+
+
+def summarize_rag_result(rag_result: Any) -> dict[str, Any]:
+    if rag_result is None:
+        return {"runtime_status": "not_requested", "reason": "RAG stage not provided."}
+
+    framework_docs: list[dict[str, Any]] = []
+    supporting_docs: list[dict[str, Any]] = []
+
+    for doc in rag_result.retrieved_documents:
+        entry = {
+            "title": doc.title,
+            "path": doc.path,
+            "score": doc.score,
+            "excerpt": doc.excerpt[:400] if doc.excerpt else "",
+        }
+        if doc.category == "ethical_frameworks":
+            framework_docs.append(entry)
+        else:
+            entry["category"] = doc.category
+            supporting_docs.append(entry)
+
+    fallback_docs = [
+        {
+            "title": doc.title,
+            "path": doc.path,
+            "score": "fallback",
+            "content_chars": len(doc.content),
+        }
+        for doc in rag_result.always_included_documents
+        if doc.category == "ethical_frameworks"
+    ]
+
+    return {
+        "runtime_available": rag_result.runtime_available,
+        "runtime_error": rag_result.runtime_error,
+        "indexed_chunks": rag_result.indexed_chunks,
+        "query": rag_result.query,
+        "frameworks_retrieved": len(framework_docs) + len(fallback_docs),
+        "supporting_docs_retrieved": len(supporting_docs),
+        "frameworks": framework_docs or fallback_docs,
+        "supporting_documents": supporting_docs,
+    }
+
+
+def summarize_reasoning_result(reasoning_result: Any) -> dict[str, Any]:
+    if reasoning_result is None:
+        return {"runtime_status": "not_requested", "reason": "Reasoning stage not provided."}
+
+    payload = reasoning_result.to_dict()
+    payload.pop("system_prompt", None)
+    return payload
+
+
+def build_summary_payload(
+    result: ScenarioPipelineResult,
+    *,
+    rag_payload: dict[str, Any],
+    reasoning_payload: dict[str, Any],
+) -> dict[str, Any]:
+    parser_result = result.parser_result
+    math_result = result.mathematical_layer_result
+    return {
+        "input_mode": parser_result.input_mode,
+        "parser_warnings": list(parser_result.warnings),
+        "violated_rules": list(math_result.violated_rules),
+        "deterministic_best_action": math_result.best_action_by_total_risk,
+        "recommended_action": reasoning_payload.get("recommended_action"),
+        "dominant_framework": reasoning_payload.get("dominant_framework"),
+        "rag_runtime_available": rag_payload.get("runtime_available", False),
+        "reasoning_runtime_available": reasoning_payload.get("runtime_available", False),
+        "reasoning_runtime_error": reasoning_payload.get("runtime_error"),
+        "rag_runtime_error": rag_payload.get("runtime_error"),
+    }
+
+
+def coerce_input_snapshot(payload: Any, *, input_mode_hint: str) -> dict[str, Any]:
+    submitted_kind = "json" if isinstance(payload, dict) else "text"
+    return {
+        "input_mode_hint": input_mode_hint,
+        "submitted_kind": submitted_kind,
+        "submitted": payload,
+    }
