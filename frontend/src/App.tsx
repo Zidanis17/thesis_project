@@ -28,8 +28,23 @@ import type {
 } from './types'
 
 type AppPage = 'studio' | 'architecture'
+type Theme = 'light' | 'dark'
 
 const DEFAULT_ARTIFACT_TAB: ArtifactTabKey = 'parser_result'
+const THEME_STORAGE_KEY = 'av_ethics.theme'
+
+function getInitialTheme(): Theme {
+  if (typeof window === 'undefined') return 'light'
+  try {
+    const storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY)
+    if (storedTheme === 'light' || storedTheme === 'dark') {
+      return storedTheme
+    }
+  } catch {
+    // Ignore storage access issues and keep a safe default.
+  }
+  return 'light'
+}
 
 function prettyJson(value: Record<string, unknown>) {
   return JSON.stringify(value, null, 2)
@@ -57,8 +72,17 @@ function getPreviousStage(runEnvelope: RunEnvelope | null, stageIndex: number) {
   return stages[Math.min(stageIndex - 1, stages.length - 1)]
 }
 
+function getFrameworkRationale(runEnvelope: RunEnvelope | null): string | null {
+  if (!runEnvelope || runEnvelope.kind !== 'success') return null
+  const rationale = runEnvelope.payload.artifacts.reasoning_result?.rationale
+  if (typeof rationale !== 'string') return null
+  const trimmed = rationale.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
 export default function App() {
   const [page, setPage] = useState<AppPage>('studio')
+  const [theme, setTheme] = useState<Theme>(() => getInitialTheme())
   const [health, setHealth] = useState<HealthResponse | null>(null)
   const [examples, setExamples] = useState<ExampleItem[]>([])
   const [subdivisions, setSubdivisions] = useState<ScenarioSubdivision[]>([])
@@ -157,6 +181,15 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, theme)
+    } catch {
+      // Ignore storage write issues; theme still applies for this session.
+    }
+  }, [theme])
+
+  useEffect(() => {
     const stages = getCurrentStages(runEnvelope)
     if (!stages.length) return
     let cancelled = false
@@ -180,6 +213,7 @@ export default function App() {
   const currentRunRecord: ScenarioRunRecord | null = runEnvelope?.payload.run ?? null
   const selectedExample = examples.find((example) => example.id === selectedExampleId) ?? null
   const selectedSubdivision = subdivisions.find((subdivision) => subdivision.id === selectedSubdivisionId) ?? null
+  const frameworkRationale = getFrameworkRationale(runEnvelope)
   const isBusy = isSubmitting || isBatchSubmitting || isStoredRunLoading
 
   async function handleRun() {
@@ -314,6 +348,10 @@ export default function App() {
     }
   }
 
+  function handleToggleTheme() {
+    setTheme((currentTheme) => (currentTheme === 'light' ? 'dark' : 'light'))
+  }
+
   const statusClass = loadingInitial ? 'booting' : health?.status === 'ok' ? 'online' : 'offline'
 
   return (
@@ -326,52 +364,64 @@ export default function App() {
           <span className="brand-sub">Pipeline Studio</span>
         </div>
 
-        <div className="navbar-runtime">
-          {health ? (
-            <>
-              <div className="rt-chip">
-                <span className="rt-dot" data-state={health.rag.runtime_available ? 'ok' : 'warn'} />
-                <span className="rt-label">RAG</span>
-                <span className="rt-val">{health.rag.runtime_available ? 'Ready' : 'Fallback'}</span>
-              </div>
-              <div className="rt-chip">
-                <span className="rt-dot" data-state={health.reasoning.runtime_available ? 'ok' : 'warn'} />
-                <span className="rt-label">Reasoning</span>
-                <span className="rt-val">
-                  {health.reasoning.runtime_available ? (health.reasoning.model_name ?? 'Ready') : 'Degraded'}
-                </span>
-              </div>
-              <div className="rt-chip">
-                <span className="rt-dot" data-state="ok" />
-                <span className="rt-label">KB</span>
-                <span className="rt-val">{health.knowledge_base_path ?? '—'}</span>
-              </div>
-            </>
-          ) : (
-            <span className="rt-loading">Connecting to runtime…</span>
-          )}
+        <div className="navbar-actions">
+          <div className="navbar-runtime">
+            {health ? (
+              <>
+                <div className="rt-chip">
+                  <span className="rt-dot" data-state={health.rag.runtime_available ? 'ok' : 'warn'} />
+                  <span className="rt-label">RAG</span>
+                  <span className="rt-val">{health.rag.runtime_available ? 'Ready' : 'Fallback'}</span>
+                </div>
+                <div className="rt-chip">
+                  <span className="rt-dot" data-state={health.reasoning.runtime_available ? 'ok' : 'warn'} />
+                  <span className="rt-label">Reasoning</span>
+                  <span className="rt-val">
+                    {health.reasoning.runtime_available ? (health.reasoning.model_name ?? 'Ready') : 'Degraded'}
+                  </span>
+                </div>
+                <div className="rt-chip">
+                  <span className="rt-dot" data-state="ok" />
+                  <span className="rt-label">KB</span>
+                  <span className="rt-val">{health.knowledge_base_path ?? '—'}</span>
+                </div>
+              </>
+            ) : (
+              <span className="rt-loading">Connecting to runtime…</span>
+            )}
 
-          <div className="nav-tabs">
-            <button
-              type="button"
-              className={`nav-tab ${page === 'studio' ? 'active' : ''}`}
-              onClick={() => setPage('studio')}
-            >
-              <span className="nav-tab-icon">⬡</span> Studio
-            </button>
-            <button
-              type="button"
-              className={`nav-tab ${page === 'architecture' ? 'active' : ''}`}
-              onClick={() => setPage('architecture')}
-            >
-              <span className="nav-tab-icon">◫</span> Architecture
-            </button>
+            <div className="nav-tabs">
+              <button
+                type="button"
+                className={`nav-tab ${page === 'studio' ? 'active' : ''}`}
+                onClick={() => setPage('studio')}
+              >
+                <span className="nav-tab-icon">⬡</span> Studio
+              </button>
+              <button
+                type="button"
+                className={`nav-tab ${page === 'architecture' ? 'active' : ''}`}
+                onClick={() => setPage('architecture')}
+              >
+                <span className="nav-tab-icon">◫</span> Architecture
+              </button>
+            </div>
+
+            <div className={`status-badge ${statusClass}`}>
+              <span className="status-pulse" />
+              {loadingInitial ? 'Booting' : health?.status ?? 'Offline'}
+            </div>
           </div>
 
-          <div className={`status-badge ${statusClass}`}>
-            <span className="status-pulse" />
-            {loadingInitial ? 'Booting' : health?.status ?? 'Offline'}
-          </div>
+          <button
+            type="button"
+            className={`theme-toggle ${theme === 'dark' ? 'is-dark' : ''}`}
+            onClick={handleToggleTheme}
+            aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          >
+            <span aria-hidden="true">🌙</span>
+          </button>
         </div>
       </nav>
 
@@ -564,6 +614,12 @@ export default function App() {
               <div className="metric-card">
                 <span className="metric-label">Dominant Framework</span>
                 <strong className="metric-value">{runEnvelope.payload.summary.dominant_framework ?? '—'}</strong>
+              </div>
+              <div className="metric-card">
+                <span className="metric-label">Framework Rationale</span>
+                <p className={`metric-rationale ${frameworkRationale ? '' : 'is-empty'}`}>
+                  {frameworkRationale ?? 'No rationale returned by the reasoning stage.'}
+                </p>
               </div>
               <div className="metric-card">
                 <span className="metric-label">Input Mode</span>

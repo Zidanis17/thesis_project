@@ -145,6 +145,7 @@ class EthicalReasoningLLM:
         rag_retrieval_result: RAGRetrievalResult | None,
     ) -> str:
         scenario = parser_result.scenario
+        
         prompt_payload = {
             "input_mode": parser_result.input_mode,
             "parser_warnings": list(parser_result.warnings),

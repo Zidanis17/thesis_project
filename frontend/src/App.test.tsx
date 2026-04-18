@@ -165,11 +165,16 @@ function buildRunPayload(overrides?: {
   dominantFramework?: string | null
   ragRuntimeAvailable?: boolean
   reasoningRuntimeAvailable?: boolean
+  rationale?: string
 }) {
   const ragRuntimeAvailable = overrides?.ragRuntimeAvailable ?? true
   const reasoningRuntimeAvailable = overrides?.reasoningRuntimeAvailable ?? true
   const bestAction = overrides?.bestAction ?? 'brake_straight'
   const dominantFramework = overrides?.dominantFramework ?? (reasoningRuntimeAvailable ? 'EF-02' : null)
+  const rationale = overrides?.rationale
+    ?? (reasoningRuntimeAvailable
+      ? 'EF-02 constrains the feasible set and EF-03 reinforces protection of the child.'
+      : '')
   return {
     run: buildRunRecord({
       id: overrides?.runId,
@@ -195,7 +200,11 @@ function buildRunPayload(overrides?: {
       parser_result: { stage: 'parser' },
       mathematical_layer_result: { stage: 'math' },
       rag_retrieval_result: { stage: 'rag', runtime_available: ragRuntimeAvailable },
-      reasoning_result: { stage: 'reasoning', runtime_available: reasoningRuntimeAvailable },
+      reasoning_result: {
+        stage: 'reasoning',
+        runtime_available: reasoningRuntimeAvailable,
+        rationale,
+      },
     },
     replay: [
       {
@@ -401,6 +410,22 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByText(/RAG degraded:/)).toBeInTheDocument()
       expect(screen.getByText(/Reasoning degraded:/)).toBeInTheDocument()
+    })
+  })
+
+  it('shows the backend rationale beside the dominant framework', async () => {
+    vi.stubGlobal('fetch', mockFetch())
+    const user = userEvent.setup()
+
+    render(<App />)
+
+    await user.click(await screen.findByRole('button', { name: 'Run Scenario' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('Framework Rationale')).toBeInTheDocument()
+      expect(
+        screen.getByText('EF-02 constrains the feasible set and EF-03 reinforces protection of the child.'),
+      ).toBeInTheDocument()
     })
   })
 

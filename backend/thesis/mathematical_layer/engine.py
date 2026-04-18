@@ -556,7 +556,7 @@ class DeterministicMathematicalLayer:
         traffic_pressure = self.TRAFFIC_PRESSURE.get(scenario.environment.traffic_density, 0.45)
         unavoidable_bonus = 0.10 if scenario.collision_unavoidable else 0.0
 
-        return _clamp(
+        return _clamp(     
             0.45 * braking_pressure
             + 0.35 * time_pressure
             + 0.07 * scene_uncertainty

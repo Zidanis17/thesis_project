@@ -17,7 +17,7 @@ export function ArchitecturePage() {
         </div>
       </div>
 
-      {/* The inner div remaps all Claude artifact CSS variables to our dark theme tokens */}
+      {/* The inner div remaps all Claude artifact CSS variables to the active app theme tokens */}
       <div className="arch-diagram-wrap">
         <div
           className="arch-diagram-vars"

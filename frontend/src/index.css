@@ -4,27 +4,31 @@
   font-family: 'Space Grotesk', 'Segoe UI', sans-serif;
   line-height: 1.5;
   font-weight: 400;
-  color-scheme: dark;
+  color-scheme: light;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   --font-mono: 'IBM Plex Mono', 'Cascadia Code', monospace;
-  --bg-base: #071019;
-  --bg-elevated: rgba(11, 20, 32, 0.88);
-  --bg-panel: rgba(12, 23, 37, 0.9);
-  --bg-panel-strong: rgba(9, 17, 28, 0.96);
-  --bg-soft: rgba(255, 255, 255, 0.04);
-  --border-soft: rgba(170, 196, 221, 0.14);
-  --border-strong: rgba(255, 255, 255, 0.1);
-  --shadow-panel: 0 24px 80px rgba(1, 6, 12, 0.44);
-  --text-primary: #f6f7fb;
-  --text-muted: #9dacbe;
-  --text-soft: #ced7e1;
+  --bg-base: #f4f7fc;
+  --bg-elevated: rgba(255, 255, 255, 0.88);
+  --bg-panel: rgba(255, 255, 255, 0.9);
+  --bg-panel-strong: rgba(250, 252, 255, 0.96);
+  --bg-soft: rgba(39, 88, 217, 0.05);
+  --border-soft: rgba(67, 90, 122, 0.14);
+  --border-strong: rgba(67, 90, 122, 0.18);
+  --shadow-panel: 0 24px 80px rgba(14, 27, 49, 0.16);
+  --text-primary: #1b2538;
+  --text-muted: #435a7a;
+  --text-soft: #6b7f9e;
   --accent-amber: #ffb042;
   --accent-teal: #21b8a6;
   --accent-red: #f16f5c;
   --accent-sky: #8cd7ff;
+}
+
+html[data-theme='dark'] {
+  color-scheme: dark;
 }
 
 * {
@@ -40,9 +44,9 @@ body,
 
 body {
   background:
-    radial-gradient(circle at top left, rgba(255, 176, 66, 0.08), transparent 34%),
-    radial-gradient(circle at 85% 15%, rgba(33, 184, 166, 0.1), transparent 28%),
-    linear-gradient(180deg, #071019 0%, #08131f 100%);
+    radial-gradient(circle at top left, var(--surface-glow-1, rgba(65, 101, 196, 0.1)), transparent 34%),
+    radial-gradient(circle at 85% 15%, var(--surface-glow-2, rgba(19, 119, 143, 0.08)), transparent 28%),
+    var(--app-body-bg, #f4f7fc);
 }
 
 button,
@@ -61,7 +65,7 @@ button {
 
 textarea:focus,
 button:focus-visible {
-  box-shadow: 0 0 0 3px rgba(140, 215, 255, 0.18);
+  box-shadow: 0 0 0 3px var(--focus-ring, rgba(39, 88, 217, 0.18));
 }
 
 a {
