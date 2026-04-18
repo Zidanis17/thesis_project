@@ -127,17 +127,19 @@ class KnowledgeBaseIngester:
         # Separate framework documents (stored whole) from everything else (chunked).
         framework_documents, general_source_documents = self._load_source_documents()
         chunked_documents = self._chunk_documents(general_source_documents)
-        all_documents = framework_documents + chunked_documents
 
         if reset_collection:
             self.vector_store.delete_collection()
             self.close()
             self.vector_store, self.text_splitter = self._build_runtime_components()
 
-        if all_documents:
+        if framework_documents:
+            self._add_framework_documents(framework_documents)
+
+        if chunked_documents:
             self.vector_store.add_documents(
-                all_documents,
-                ids=[str(doc.metadata["chunk_id"]) for doc in all_documents],
+                chunked_documents,
+                ids=[str(doc.metadata["chunk_id"]) for doc in chunked_documents],
             )
 
         unique_paths = {
@@ -158,6 +160,39 @@ class KnowledgeBaseIngester:
         client = getattr(self.vector_store, "_client", None)
         if client is not None and hasattr(client, "close"):
             client.close()
+
+    def _add_framework_documents(self, documents: list[Any]) -> None:
+        """
+        Store framework files as whole documents while embedding their distilled
+        semantic text when available.
+        """
+        if self.vector_store is None:
+            raise RuntimeError("Knowledge-base ingester is unavailable")
+
+        embeddings = self.embeddings or getattr(
+            self.vector_store, "_embedding_function", None
+        )
+        if embeddings is None or not hasattr(embeddings, "embed_documents"):
+            raise RuntimeError("Knowledge-base ingester has no embedding function")
+
+        collection = getattr(self.vector_store, "_chroma_collection", None)
+        if collection is None or not hasattr(collection, "upsert"):
+            raise RuntimeError("Knowledge-base ingester cannot access Chroma collection")
+
+        ids = [str(document.metadata["chunk_id"]) for document in documents]
+        metadatas = [dict(document.metadata or {}) for document in documents]
+        stored_documents = [document.page_content for document in documents]
+        embedding_texts = [
+            str(metadata.get("embedding_text") or document.page_content)
+            for document, metadata in zip(documents, metadatas, strict=True)
+        ]
+
+        collection.upsert(
+            ids=ids,
+            embeddings=embeddings.embed_documents(embedding_texts),
+            documents=stored_documents,
+            metadatas=metadatas,
+        )
 
     # ── Loading ───────────────────────────────────────────────────────────────
 
@@ -429,6 +464,7 @@ class KnowledgeBaseIngester:
             if not os.getenv("OPENAI_API_KEY"):
                 raise RuntimeError("OPENAI_API_KEY is required for OpenAI embeddings")
             embeddings = OpenAIEmbeddings(model=self.embedding_model)
+        self.embeddings = embeddings
 
         client_settings = Settings(anonymized_telemetry=False)
         client = chromadb.PersistentClient(
