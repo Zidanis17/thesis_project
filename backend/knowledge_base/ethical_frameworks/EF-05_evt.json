@@ -35,6 +35,7 @@
     "scenarios requiring fast real-time decisions where MDP look-ahead is too slow"
   ],
   "use_when": [
+    "collision_unavoidable is true AND ego:passenger appears in risk_score_matrix alongside at least one VRU stakeholder — the passenger is a scored stakeholder and the dilemma has distinct social categories",
     "collision_unavoidable is true AND the dilemma involves clearly distinct stakeholder categories such as passenger vs pedestrian",
     "the social identity or role of road users (child, pedestrian, passenger) is a morally relevant distinguishing factor between available actions",
     "the deployment context requires explicit disclosure of the moral profile used"
@@ -45,7 +46,8 @@
     "demographic weighting would create legal discrimination liability in the deployment jurisdiction"
   ],
   "dominant_when": [
-    "collision_unavoidable is true AND the dilemma is explicitly passenger vs pedestrian or involves distinct social categories AND the valence hierarchy was the deciding factor between otherwise comparable actions"
+    "collision_unavoidable is true AND ego:passenger appears in risk_score_matrix AND at least one VRU stakeholder (pedestrian, child, cyclist) also appears in risk_score_matrix — the co-presence of passenger and VRU as scored stakeholders defines a passenger-vs-VRU dilemma and makes EF-05 dominant",
+    "collision_unavoidable is true AND the action that best protects the passenger differs from the action that best protects the VRU — the cross-category trade-off between passenger and pedestrian is the axis that determined the selected action"
   ],
   "tradeoffs": "vs Utilitarian (EF-01): EF-05 adds a social valence layer on top of harm minimization — EF-01 minimises raw aggregate harm without considering the social identity of those harmed. vs Maximin (EF-03): EF-05 is not purely worst-case — it balances valence hierarchy with harm magnitude, whereas EF-03 focuses only on risk magnitude. vs Ethics of Risk (EF-04): EF-04 uses objective risk metrics; EF-05 adds subjective social weighting — they are addressing different ethical dimensions and can be combined. vs Deontological (EF-02): EVT is outcome-focused; EF-02 is rule-based — EVT would choose to violate a rule if the valence-weighted outcome justifies it.",
   "key_parameters": [
