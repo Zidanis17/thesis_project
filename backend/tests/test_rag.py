@@ -517,8 +517,22 @@ class RAGRetrieverTests(unittest.TestCase):
                 {Path(document.path).name for document in result.always_included_documents}.issubset(set(framework_files))
             )
             self.assertTrue(
-                any('"source": "Utilitarianism"' in document.content for document in result.always_included_documents)
+                any('"source": "Deontology"' in document.content for document in result.always_included_documents)
             )
+
+    def test_vru_heuristics_use_type_and_vulnerability_class(self) -> None:
+        payload = build_sample_payload()
+        payload["environment"]["road_type"] = "ring_road"
+        payload["environment"]["weather"] = "light_rain"
+        payload["obstacles"][0]["type"] = "vehicle_sedan"
+        payload["obstacles"][0]["vulnerability_class"] = "high"
+        scenario = self.parser.parse(payload).scenario
+        retriever = DeterministicRAGRetriever.__new__(DeterministicRAGRetriever)
+
+        hint = retriever._heuristic_hint(scenario)
+
+        self.assertIn("maximin worst-off protection", hint)
+        self.assertIn("high speed highway aggregate risk", hint)
 
     def test_package_import_does_not_require_rag_runtime_dependencies(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

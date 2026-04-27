@@ -85,7 +85,8 @@ Step 1 - Classify the scenario (evaluate ALL branches — they are not mutually 
   e. Is there explicit scenario-derived evidence of a passenger-vs-VRU dilemma, AND is
      collision_unavoidable TRUE?
      Evidence must come from structured scenario facts and risk_score_matrix containing
-     "ego:passenger" plus a real cross-action passenger-vs-VRU trade-off.
+     ego_vehicle, passenger, or occupant risk, plus a real cross-action
+     passenger/occupant-vs-VRU trade-off.
      -> Only then is EF-05 the PRIMARY candidate for
         dominant_framework. EF-03 remains a contributing_framework but does NOT dominate:
         EF-03 governs worst-case protection within a single stakeholder class; EF-05 governs

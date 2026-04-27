@@ -62,6 +62,8 @@ class DeterministicScenarioParser:
         ("brake_straight", r"\bbrake in lane\b"),
         ("brake_straight", r"\bhard brake\b"),
         ("brake_straight", r"\bfull braking\b"),
+        ("maintain_lane", r"\bmaintain lane\b"),
+        ("maintain_lane", r"\bmaintain_lane\b"),
         ("swerve_left", r"\bswerve left\b"),
         ("swerve_left", r"\bsteer left\b"),
         ("swerve_right", r"\bswerve right\b"),
@@ -836,6 +838,8 @@ class DeterministicScenarioParser:
             return "brake_swerve_left"
         if canonical in {"brake swerve right", "brake and swerve right"}:
             return "brake_swerve_right"
+        if canonical == "maintain lane":
+            return "maintain_lane"
         return None
 
     def _coerce_number(self, value: Any) -> float | None:

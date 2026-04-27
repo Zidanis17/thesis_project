@@ -17,6 +17,7 @@ DEFAULT_RUNS_DB_PATH = (Path(__file__).resolve().parents[2] / "data" / "scenario
 __all__ = [
     "DEFAULT_RUNS_DB_PATH",
     "RunStatus",
+    "StoredEvaluationRunRecord",
     "ScenarioRunStore",
     "StoredRunRecord",
 ]
@@ -57,6 +58,34 @@ class StoredRunRecord:
             "error_code": self.error_code,
             "error_message": self.error_message,
             "replay_stage_count": self.replay_stage_count,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class StoredEvaluationRunRecord:
+    id: str
+    created_at: str
+    scope: str
+    subdivision_id: str | None
+    variant: str | None
+    model_name: str | None
+    total_scenarios: int
+    completed_runs: int
+    failed_runs: int
+    overall_accuracy_pct: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "created_at": self.created_at,
+            "scope": self.scope,
+            "subdivision_id": self.subdivision_id,
+            "variant": self.variant,
+            "model_name": self.model_name,
+            "total_scenarios": self.total_scenarios,
+            "completed_runs": self.completed_runs,
+            "failed_runs": self.failed_runs,
+            "overall_accuracy_pct": self.overall_accuracy_pct,
         }
 
 
@@ -101,6 +130,29 @@ class ScenarioRunStore:
                 """
                 CREATE INDEX IF NOT EXISTS idx_scenario_runs_created_at
                 ON scenario_runs(created_at DESC)
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS evaluation_runs (
+                    id TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    scope TEXT NOT NULL,
+                    subdivision_id TEXT,
+                    variant TEXT,
+                    model_name TEXT,
+                    total_scenarios INTEGER NOT NULL,
+                    completed_runs INTEGER NOT NULL,
+                    failed_runs INTEGER NOT NULL,
+                    overall_accuracy_pct REAL NOT NULL,
+                    payload_json TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_evaluation_runs_created_at
+                ON evaluation_runs(created_at DESC)
                 """
             )
 
@@ -263,6 +315,114 @@ class ScenarioRunStore:
             **payload,
         }
 
+    def save_evaluation_run(
+        self,
+        *,
+        payload: dict[str, Any],
+        scope: str,
+        subdivision_id: str | None,
+        variant: str | None,
+        model_name: str | None,
+    ) -> dict[str, Any]:
+        evaluation_id = str(payload.get("evaluation_id") or uuid4())
+        created_at = str(payload.get("created_at") or _utc_now())
+        stored_payload = {
+            **payload,
+            "evaluation_id": evaluation_id,
+            "created_at": created_at,
+        }
+        total_scenarios = int(stored_payload.get("total_scenarios") or 0)
+        completed_runs = int(stored_payload.get("completed_runs") or 0)
+        failed_runs = int(stored_payload.get("failed_runs") or 0)
+        overall_accuracy_pct = float(stored_payload.get("overall_accuracy_pct") or 0.0)
+
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO evaluation_runs (
+                    id,
+                    created_at,
+                    scope,
+                    subdivision_id,
+                    variant,
+                    model_name,
+                    total_scenarios,
+                    completed_runs,
+                    failed_runs,
+                    overall_accuracy_pct,
+                    payload_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    evaluation_id,
+                    created_at,
+                    scope,
+                    subdivision_id,
+                    variant,
+                    model_name,
+                    total_scenarios,
+                    completed_runs,
+                    failed_runs,
+                    overall_accuracy_pct,
+                    _dump_json(stored_payload),
+                ),
+            )
+
+        return stored_payload
+
+    def list_evaluation_runs(self, *, limit: int = 25) -> dict[str, Any]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    id,
+                    created_at,
+                    scope,
+                    subdivision_id,
+                    variant,
+                    model_name,
+                    total_scenarios,
+                    completed_runs,
+                    failed_runs,
+                    overall_accuracy_pct
+                FROM evaluation_runs
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+            totals = connection.execute(
+                """
+                SELECT
+                    COUNT(*) AS total_runs,
+                    SUM(CASE WHEN scope = 'full_bank' THEN 1 ELSE 0 END) AS full_bank_runs,
+                    SUM(CASE WHEN scope = 'subdivision' THEN 1 ELSE 0 END) AS subdivision_runs
+                FROM evaluation_runs
+                """
+            ).fetchone()
+
+        return {
+            "runs": [_evaluation_record_from_row(row).to_dict() for row in rows],
+            "total_runs": int(totals["total_runs"] or 0),
+            "full_bank_runs": int(totals["full_bank_runs"] or 0),
+            "subdivision_runs": int(totals["subdivision_runs"] or 0),
+        }
+
+    def get_evaluation_run(self, evaluation_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT payload_json
+                FROM evaluation_runs
+                WHERE id = ?
+                """,
+                (evaluation_id,),
+            ).fetchone()
+
+        if row is None:
+            return None
+        return json.loads(row["payload_json"])
+
 
 def _record_from_row(row: sqlite3.Row) -> StoredRunRecord:
     status = str(row["status"])
@@ -284,6 +444,21 @@ def _record_from_row(row: sqlite3.Row) -> StoredRunRecord:
         error_code=str(row["error_code"]) if row["error_code"] is not None else None,
         error_message=str(row["error_message"]) if row["error_message"] is not None else None,
         replay_stage_count=int(row["replay_stage_count"]),
+    )
+
+
+def _evaluation_record_from_row(row: sqlite3.Row) -> StoredEvaluationRunRecord:
+    return StoredEvaluationRunRecord(
+        id=str(row["id"]),
+        created_at=str(row["created_at"]),
+        scope=str(row["scope"]),
+        subdivision_id=str(row["subdivision_id"]) if row["subdivision_id"] is not None else None,
+        variant=str(row["variant"]) if row["variant"] is not None else None,
+        model_name=str(row["model_name"]) if row["model_name"] is not None else None,
+        total_scenarios=int(row["total_scenarios"]),
+        completed_runs=int(row["completed_runs"]),
+        failed_runs=int(row["failed_runs"]),
+        overall_accuracy_pct=float(row["overall_accuracy_pct"]),
     )
 
 

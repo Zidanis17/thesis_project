@@ -6,8 +6,8 @@ from fastapi import Depends, FastAPI, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
-from .examples import SHOWCASE_EXAMPLES, SHOWCASE_SUBDIVISIONS, get_examples_by_subdivision
-from .runner import InputModeHint, ScenarioDomainError, ShowcaseRuntime
+from .examples import SHOWCASE_EXAMPLES, SHOWCASE_SUBDIVISIONS, get_examples_by_subdivision, get_scenario_bank_examples
+from .runner import EvaluationVariant, InputModeHint, ScenarioDomainError, ShowcaseRuntime
 from .storage import ScenarioRunStore
 
 __all__ = ["app", "create_app"]
@@ -22,6 +22,13 @@ class ScenarioRunRequest(BaseModel):
 
 class SubdivisionRunRequest(BaseModel):
     subdivision_id: str
+    variant: EvaluationVariant = "full_system"
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ScenarioBankRunRequest(BaseModel):
+    variant: EvaluationVariant = "full_system"
 
     model_config = ConfigDict(extra="forbid")
 
@@ -122,6 +129,7 @@ def create_app(
     def run_subdivision(
         request_payload: SubdivisionRunRequest,
         runtime: ShowcaseRuntime = Depends(get_runtime),
+        run_store: ScenarioRunStore = Depends(get_run_store),
     ) -> Any:
         subdivision = next(
             (item for item in SHOWCASE_SUBDIVISIONS if item["id"] == request_payload.subdivision_id),
@@ -139,12 +147,69 @@ def create_app(
             )
 
         try:
-            return runtime.run_subdivision(
+            payload = runtime.run_subdivision(
                 subdivision=subdivision,
                 examples=get_examples_by_subdivision(subdivision["id"]),
+                variant=request_payload.variant,
+            )
+            model_name = runtime.reasoning_llm.model_name if runtime.reasoning_llm is not None else None
+            return run_store.save_evaluation_run(
+                payload=payload,
+                scope="subdivision",
+                subdivision_id=subdivision["id"],
+                variant=request_payload.variant,
+                model_name=model_name,
             )
         except ScenarioDomainError as exc:
             return JSONResponse(status_code=400, content=exc.payload)
+
+    @app.post("/api/v1/scenario/bank/run", response_model=None)
+    def run_scenario_bank(
+        request_payload: ScenarioBankRunRequest | None = None,
+        runtime: ShowcaseRuntime = Depends(get_runtime),
+        run_store: ScenarioRunStore = Depends(get_run_store),
+    ) -> Any:
+        request_payload = request_payload or ScenarioBankRunRequest()
+        try:
+            payload = runtime.run_scenario_bank(
+                examples=get_scenario_bank_examples(),
+                variant=request_payload.variant,
+            )
+            model_name = runtime.reasoning_llm.model_name if runtime.reasoning_llm is not None else None
+            return run_store.save_evaluation_run(
+                payload=payload,
+                scope="full_bank",
+                subdivision_id=None,
+                variant=request_payload.variant,
+                model_name=model_name,
+            )
+        except ScenarioDomainError as exc:
+            return JSONResponse(status_code=400, content=exc.payload)
+
+    @app.get("/api/v1/evaluations")
+    def list_evaluation_runs(
+        limit: int = Query(default=25, ge=1, le=200),
+        run_store: ScenarioRunStore = Depends(get_run_store),
+    ) -> dict[str, Any]:
+        return run_store.list_evaluation_runs(limit=limit)
+
+    @app.get("/api/v1/evaluations/{evaluation_id}")
+    def get_evaluation_run(
+        evaluation_id: str,
+        run_store: ScenarioRunStore = Depends(get_run_store),
+    ) -> Any:
+        payload = run_store.get_evaluation_run(evaluation_id)
+        if payload is None:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "error": {
+                        "code": "evaluation_not_found",
+                        "message": f"Evaluation run '{evaluation_id}' was not found.",
+                    }
+                },
+            )
+        return payload
 
     return app
 

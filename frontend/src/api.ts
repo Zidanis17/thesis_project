@@ -1,4 +1,6 @@
 import type {
+  EvaluationRunHistoryResponse,
+  EvaluationRunResponse,
   HealthResponse,
   InputEditorMode,
   RunEnvelope,
@@ -96,4 +98,38 @@ export async function runSubdivision(subdivisionId: string): Promise<Subdivision
   }
 
   return readJson<SubdivisionRunResponse>(response)
+}
+
+export async function runScenarioBank(variant: 'full_system' | 'no_rag' = 'full_system'): Promise<EvaluationRunResponse> {
+  const response = await fetch(`${API_BASE}/api/v1/scenario/bank/run`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ variant }),
+  })
+
+  if (!response.ok) {
+    const payload = await readJson<{ error?: { message?: string } }>(response)
+    throw new Error(payload.error?.message ?? `Scenario bank request failed with status ${response.status}.`)
+  }
+
+  return readJson<EvaluationRunResponse>(response)
+}
+
+export async function fetchEvaluationHistory(limit = 25): Promise<EvaluationRunHistoryResponse> {
+  const response = await fetch(`${API_BASE}/api/v1/evaluations?limit=${limit}`)
+  if (!response.ok) {
+    throw new Error('Failed to load stored evaluation history.')
+  }
+  return readJson<EvaluationRunHistoryResponse>(response)
+}
+
+export async function fetchEvaluationById(evaluationId: string): Promise<EvaluationRunResponse> {
+  const response = await fetch(`${API_BASE}/api/v1/evaluations/${evaluationId}`)
+  if (!response.ok) {
+    const payload = await readJson<{ error?: { message?: string } }>(response)
+    throw new Error(payload.error?.message ?? `Stored evaluation request failed with status ${response.status}.`)
+  }
+  return readJson<EvaluationRunResponse>(response)
 }

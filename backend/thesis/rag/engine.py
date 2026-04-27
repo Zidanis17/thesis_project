@@ -83,6 +83,30 @@ class DeterministicRAGRetriever:
 
     # Excerpt shown in the result summary — full_content is passed to the LLM layer.
     EXCERPT_LIMIT = 1500
+    WEATHER_CANONICAL_MAP = {
+        "light_rain": "rain",
+        "overcast": "clear",
+    }
+    ROAD_TYPE_CANONICAL_MAP = {
+        "urban_arterial": "urban",
+        "residential_street": "residential",
+        "urban_intersection": "intersection",
+        "ring_road": "highway",
+        "highway_merge": "highway",
+        "hospital_access_road": "hospital_zone",
+    }
+    VRU_TYPES = {
+        "pedestrian",
+        "pedestrian_adult",
+        "adult_pedestrian",
+        "child_pedestrian",
+        "elderly_pedestrian",
+        "cyclist",
+        "motorcyclist",
+        "hidden_pedestrian",
+        "hidden_cyclist",
+    }
+    VRU_VULNERABILITY_CLASSES = {"high", "child", "elderly", "cyclist", "pedestrian"}
 
     def __init__(
         self,
@@ -219,11 +243,13 @@ class DeterministicRAGRetriever:
         ) or "no obstacles"
 
         actions = ", ".join(scenario.available_actions) or "none"
+        road_type = self._canonical_road_type(scenario.environment.road_type)
+        weather = self._canonical_weather(scenario.environment.weather)
 
         query = (
             f"Autonomous vehicle ethical decision-making: "
-            f"{scenario.environment.road_type} road, "
-            f"{scenario.environment.weather} weather, "
+            f"{road_type} road, "
+            f"{weather} weather, "
             f"{scenario.environment.time_of_day}, "
             f"{scenario.environment.traffic_density} traffic density. "
             f"Collision unavoidable: {scenario.collision_unavoidable}. "
@@ -255,10 +281,7 @@ class DeterministicRAGRetriever:
         """
         hints: list[str] = []
 
-        vru_present = any(
-            o.vulnerability_class in {"child", "elderly", "cyclist", "pedestrian"}
-            for o in scenario.obstacles
-        )
+        vru_present = self._vru_present(scenario)
 
         if not scenario.collision_unavoidable:
             hints.append("deontological rule-based safety RSS responsibility sensitive")
@@ -272,10 +295,11 @@ class DeterministicRAGRetriever:
         if scenario.collision_unavoidable and vru_present:
             hints.append("ethics of risk weighted distribution equity fairness")
 
-        if scenario.environment.road_type in {"highway", "motorway"}:
+        road_type = self._canonical_road_type(scenario.environment.road_type)
+        if road_type in {"highway", "motorway"}:
             hints.append("high speed highway aggregate risk utilitarian")
 
-        if scenario.environment.road_type in {"school_zone", "hospital_zone"}:
+        if road_type in {"school_zone", "hospital_zone"}:
             hints.append("maximin vulnerable protection school zone")
 
         return " ".join(hints)
@@ -415,10 +439,7 @@ class DeterministicRAGRetriever:
         if not all_docs:
             return []
 
-        vru_present = any(
-            o.vulnerability_class in {"child", "elderly", "cyclist", "pedestrian"}
-            for o in scenario.obstacles
-        )
+        vru_present = self._vru_present(scenario)
 
         # Priority ordering based on the selection heuristic
         def priority(doc: AlwaysIncludedDocument) -> int:
@@ -440,6 +461,21 @@ class DeterministicRAGRetriever:
 
     def _default_knowledge_base_path(self) -> Path:
         return Path(__file__).resolve().parents[2] / "knowledge_base"
+
+    def _vru_present(self, scenario: Scenario) -> bool:
+        return any(
+            obstacle.vulnerability_class.strip().lower() in self.VRU_VULNERABILITY_CLASSES
+            or obstacle.type.strip().lower() in self.VRU_TYPES
+            for obstacle in scenario.obstacles
+        )
+
+    def _canonical_weather(self, weather: str) -> str:
+        value = weather.strip().lower()
+        return self.WEATHER_CANONICAL_MAP.get(value, value)
+
+    def _canonical_road_type(self, road_type: str) -> str:
+        value = road_type.strip().lower()
+        return self.ROAD_TYPE_CANONICAL_MAP.get(value, value)
 
     def _build_vector_store(self) -> Any:
         import chromadb

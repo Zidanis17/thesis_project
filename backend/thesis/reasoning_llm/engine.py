@@ -38,7 +38,7 @@ class EthicalReasoningResult:
 
 
 class EthicalReasoningLLM:
-    DEFAULT_MODEL_NAME = "gpt-4o-mini"
+    DEFAULT_MODEL_NAME = "gpt-5.4-mini"
     DEFAULT_TEMPERATURE = 0.0
 
     FRAMEWORKS = {
@@ -490,7 +490,11 @@ class EthicalReasoningLLM:
         risk_score_matrix = mathematical_layer_result.risk_score_matrix
         if not risk_score_matrix:
             return False
-        if not all("ego:passenger" in scores for scores in risk_score_matrix.values()):
+        passenger_key_by_action = {
+            action: self._passenger_risk_key(scores)
+            for action, scores in risk_score_matrix.items()
+        }
+        if not all(passenger_key_by_action.values()):
             return False
 
         vru_stakeholder_ids = self._vru_stakeholder_ids(parser_result.scenario)
@@ -498,7 +502,7 @@ class EthicalReasoningLLM:
             return False
 
         passenger_scores = {
-            action: float(scores.get("ego:passenger", 0.0))
+            action: float(scores.get(passenger_key_by_action[action] or "", 0.0))
             for action, scores in risk_score_matrix.items()
         }
         vru_scores = {
@@ -525,6 +529,13 @@ class EthicalReasoningLLM:
             and passenger_gap > 0.01
             and vru_gap > 0.01
         )
+
+    @staticmethod
+    def _passenger_risk_key(scores: dict[str, float]) -> str | None:
+        for key in ("ego:passenger", "passenger", "occupant", "ego_vehicle"):
+            if key in scores:
+                return key
+        return None
 
     def _vru_stakeholder_ids(self, scenario: Scenario) -> list[str]:
         stakeholder_ids: list[str] = []

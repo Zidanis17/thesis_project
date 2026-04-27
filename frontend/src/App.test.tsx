@@ -57,6 +57,20 @@ const catalogPayload = {
 }
 
 const subdivisionPayload = {
+  evaluation_id: 'eval-001',
+  created_at: '2026-04-03T20:00:00Z',
+  scope: 'subdivision',
+  variant: 'full_system',
+  subdivision_id: 'routine_rule_governed',
+  subdivision_label: 'Routine Rule Governed',
+  total_scenarios: 2,
+  completed_runs: 2,
+  failed_runs: 0,
+  completion_rate_pct: 100,
+  correct_predictions: 2,
+  incorrect_predictions: 0,
+  overall_accuracy_pct: 100,
+  total_duration_ms: 240,
   subdivision: {
     id: 'routine_rule_governed',
     label: 'Routine Rule Governed',
@@ -79,8 +93,20 @@ const subdivisionPayload = {
     completed_runs: 2,
     failed_runs: 0,
     completion_rate_pct: 100,
+    correct_predictions: 2,
+    incorrect_predictions: 0,
+    accuracy_pct: 100,
+    expected_framework: 'EF-02',
+    expected_framework_total: 2,
+    average_confidence: 0.91,
+    average_confidence_correct: 0.91,
+    average_confidence_incorrect: null,
     reasoning_runtime_ready_pct: 100,
     rag_runtime_ready_pct: 100,
+    rag_retrieval_hit_rate_pct: 100,
+    risk_matrix_preservation_rate_pct: 100,
+    reasoning_contract_validity_rate_pct: 100,
+    weights_validity_rate_pct: 100,
     top_framework: 'EF-02',
     top_framework_label: 'Deontological Rule-Based Safety',
     top_framework_percentage: 100,
@@ -94,6 +120,52 @@ const subdivisionPayload = {
       percentage: 100,
     },
   ],
+  expected_framework_distribution: [
+    {
+      framework_id: 'EF-02',
+      framework_label: 'Deontological Rule-Based Safety',
+      count: 2,
+      percentage: 100,
+    },
+  ],
+  per_framework_accuracy: [
+    {
+      framework_id: 'EF-01',
+      expected_count: 0,
+      correct_count: 0,
+      incorrect_count: 0,
+      accuracy_pct: 0,
+    },
+    {
+      framework_id: 'EF-02',
+      expected_count: 2,
+      correct_count: 2,
+      incorrect_count: 0,
+      accuracy_pct: 100,
+    },
+  ],
+  confusion_matrix: {
+    labels: ['EF-01', 'EF-02', 'EF-03', 'EF-05', 'EF-06', 'EF-04_invalid', 'unresolved', 'other_invalid'],
+    rows: [
+      {
+        expected: 'EF-02',
+        predictions: {
+          'EF-01': 0,
+          'EF-02': 2,
+          'EF-03': 0,
+          'EF-05': 0,
+          'EF-06': 0,
+          'EF-04_invalid': 0,
+          unresolved: 0,
+          other_invalid: 0,
+        },
+      },
+    ],
+  },
+  rag_retrieval_hit_rate_pct: 100,
+  reasoning_contract_validity_rate_pct: 100,
+  risk_matrix_preservation_rate_pct: 100,
+  weights_validity_rate_pct: 100,
   scenario_results: [
     {
       scenario_id: 'json-example',
@@ -101,10 +173,24 @@ const subdivisionPayload = {
       subdivision_id: 'routine_rule_governed',
       subdivision_label: 'Routine Rule Governed',
       expected_framework: 'EF-02',
+      dominant_framework: 'EF-02',
+      correct_prediction: true,
+      confidence: 0.91,
+      contributing_frameworks: ['EF-01', 'EF-03'],
+      weights: { bayesian: 0.4, equality: 0.2, maximin: 0.4 },
+      retrieved_framework_ids: ['EF-02'],
+      expected_framework_retrieved: true,
+      top_retrieved_framework: 'EF-02',
+      top_retrieval_score: 0.93,
+      reasoning_contract_valid: true,
+      dominant_framework_valid: true,
+      weights_sum_to_one: true,
+      risk_matrix_preserved: true,
+      no_recommended_action: true,
+      violated_constraints_supported: true,
+      deterministic_best_action: 'brake_straight',
       status: 'success',
       duration_ms: 120,
-      deterministic_best_action: 'brake_straight',
-      dominant_framework: 'EF-02',
       reasoning_runtime_available: true,
       rag_runtime_available: true,
       error_code: null,
@@ -116,10 +202,24 @@ const subdivisionPayload = {
       subdivision_id: 'routine_rule_governed',
       subdivision_label: 'Routine Rule Governed',
       expected_framework: 'EF-02',
+      dominant_framework: 'EF-02',
+      correct_prediction: true,
+      confidence: 0.91,
+      contributing_frameworks: ['EF-01', 'EF-03'],
+      weights: { bayesian: 0.4, equality: 0.2, maximin: 0.4 },
+      retrieved_framework_ids: ['EF-02'],
+      expected_framework_retrieved: true,
+      top_retrieved_framework: 'EF-02',
+      top_retrieval_score: 0.93,
+      reasoning_contract_valid: true,
+      dominant_framework_valid: true,
+      weights_sum_to_one: true,
+      risk_matrix_preserved: true,
+      no_recommended_action: true,
+      violated_constraints_supported: true,
+      deterministic_best_action: 'brake_straight',
       status: 'success',
       duration_ms: 120,
-      deterministic_best_action: 'brake_straight',
-      dominant_framework: 'EF-02',
       reasoning_runtime_available: true,
       rag_runtime_available: true,
       error_code: null,
@@ -456,8 +556,11 @@ describe('App', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('framework-graph')).toBeInTheDocument()
-      expect(screen.getAllByText('Deontological Rule-Based Safety')).toHaveLength(2)
+      expect(screen.getAllByText('Deontological Rule-Based Safety').length).toBeGreaterThanOrEqual(1)
       expect(screen.getByText('100.0% (2)')).toBeInTheDocument()
+      expect(screen.getByText('100.0% RAG hit rate')).toBeInTheDocument()
+      expect(screen.getByText('Per-Framework Accuracy')).toBeInTheDocument()
+      expect(screen.getByText('Confusion Matrix')).toBeInTheDocument()
       const expectationPanel = screen.getByTestId('subdivision-expectation')
       expect(expectationPanel).toBeInTheDocument()
       expect(expectationPanel).toHaveTextContent('Rule compliance')

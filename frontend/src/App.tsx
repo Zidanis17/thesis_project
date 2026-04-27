@@ -6,6 +6,7 @@ import {
   fetchScenarioRunById,
   fetchScenarioRunHistory,
   runScenario,
+  runScenarioBank,
   runSubdivision,
 } from './api'
 import { ArtifactTabs } from './components/ArtifactTabs'
@@ -16,6 +17,7 @@ import { RunHistoryPanel } from './components/RunHistoryPanel'
 import { SubdivisionMetricsPanel } from './components/SubdivisionMetricsPanel'
 import type {
   ArtifactTabKey,
+  EvaluationRunResponse,
   ExampleItem,
   HealthResponse,
   InputEditorMode,
@@ -24,7 +26,6 @@ import type {
   ScenarioRunHistoryResponse,
   ScenarioRunRecord,
   ScenarioSubdivision,
-  SubdivisionRunResponse,
 } from './types'
 
 type AppPage = 'studio' | 'architecture'
@@ -93,13 +94,14 @@ export default function App() {
   const [textInput, setTextInput] = useState('')
   const [runEnvelope, setRunEnvelope] = useState<RunEnvelope | null>(null)
   const [runHistory, setRunHistory] = useState<ScenarioRunHistoryResponse | null>(null)
-  const [batchResult, setBatchResult] = useState<SubdivisionRunResponse | null>(null)
+  const [evaluationResult, setEvaluationResult] = useState<EvaluationRunResponse | null>(null)
   const [activeStageIndex, setActiveStageIndex] = useState(0)
   const [selectedArtifact, setSelectedArtifact] = useState<ArtifactTabKey>(DEFAULT_ARTIFACT_TAB)
   const [selectedHistoryRunId, setSelectedHistoryRunId] = useState<string | null>(null)
   const [loadingInitial, setLoadingInitial] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isBatchSubmitting, setIsBatchSubmitting] = useState(false)
+  const [isBankSubmitting, setIsBankSubmitting] = useState(false)
   const [isHistoryLoading, setIsHistoryLoading] = useState(false)
   const [isStoredRunLoading, setIsStoredRunLoading] = useState(false)
   const [isReplaying, setIsReplaying] = useState(false)
@@ -214,7 +216,7 @@ export default function App() {
   const selectedExample = examples.find((example) => example.id === selectedExampleId) ?? null
   const selectedSubdivision = subdivisions.find((subdivision) => subdivision.id === selectedSubdivisionId) ?? null
   const frameworkRationale = getFrameworkRationale(runEnvelope)
-  const isBusy = isSubmitting || isBatchSubmitting || isStoredRunLoading
+  const isBusy = isSubmitting || isBatchSubmitting || isBankSubmitting || isStoredRunLoading
 
   async function handleRun() {
     setClientError(null)
@@ -282,12 +284,28 @@ export default function App() {
     try {
       const response = await runSubdivision(selectedSubdivisionId)
       startTransition(() => {
-        setBatchResult(response)
+        setEvaluationResult(response)
       })
     } catch (error) {
       setBatchError(error instanceof Error ? error.message : 'Subdivision batch request failed.')
     } finally {
       setIsBatchSubmitting(false)
+    }
+  }
+
+  async function handleRunScenarioBank() {
+    setBatchError(null)
+    setRequestError(null)
+    setIsBankSubmitting(true)
+    try {
+      const response = await runScenarioBank()
+      startTransition(() => {
+        setEvaluationResult(response)
+      })
+    } catch (error) {
+      setBatchError(error instanceof Error ? error.message : 'Scenario bank evaluation request failed.')
+    } finally {
+      setIsBankSubmitting(false)
     }
   }
 
@@ -312,7 +330,7 @@ export default function App() {
 
   function handleReset() {
     setRunEnvelope(null)
-    setBatchResult(null)
+    setEvaluationResult(null)
     setActiveStageIndex(0)
     setClientError(null)
     setRequestError(null)
@@ -507,7 +525,7 @@ export default function App() {
                       value={selectedSubdivisionId}
                       onChange={(e) => {
                         setSelectedSubdivisionId(e.target.value)
-                        setBatchResult(null)
+                        setEvaluationResult(null)
                         setBatchError(null)
                       }}
                     >
@@ -598,6 +616,19 @@ export default function App() {
                 : <><span className="run-icon">▦</span> Run Whole Subdivision</>
               }
             </button>
+
+            <button
+              type="button"
+              aria-label="Run Full Scenario Bank"
+              className={`run-btn secondary ${isBankSubmitting ? 'loading' : ''}`}
+              onClick={handleRunScenarioBank}
+              disabled={isBusy}
+            >
+              {isBankSubmitting
+                ? <><span className="run-spinner" /> Processing...</>
+                : <><span className="run-icon">▦</span> Run Full Scenario Bank</>
+              }
+            </button>
           </div>
         </aside>
 
@@ -664,18 +695,18 @@ export default function App() {
           <div className="subdivision-panel">
             <div className="panel-header">
               <span className="panel-tag">02B</span>
-              <span className="panel-title">Subdivision Metrics</span>
+              <span className="panel-title">Evaluation Metrics</span>
               <span className="panel-status">
-                {isBatchSubmitting
+                {isBatchSubmitting || isBankSubmitting
                   ? <><span className="spin-dot" /> Processing</>
-                  : batchResult
-                  ? `${batchResult.subdivision.label} · ${batchResult.summary.top_framework_percentage}% top share`
+                  : evaluationResult
+                  ? `${evaluationResult.scope === 'full_bank' ? 'Full bank' : evaluationResult.subdivision_label ?? 'Subdivision'} · ${evaluationResult.summary.accuracy_pct}% accuracy`
                   : 'Idle - awaiting batch run'}
               </span>
             </div>
             <SubdivisionMetricsPanel
-              result={batchResult}
-              isLoading={isBatchSubmitting}
+              result={evaluationResult}
+              isLoading={isBatchSubmitting || isBankSubmitting}
               error={batchError}
             />
           </div>

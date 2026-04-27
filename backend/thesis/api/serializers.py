@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import re
 from typing import Any
 
 from ..pipeline import ScenarioPipelineResult
@@ -8,10 +10,14 @@ from .payload import strip_payload_metadata
 __all__ = [
     "build_summary_payload",
     "coerce_input_snapshot",
+    "extract_framework_id",
     "summarize_rag_result",
     "summarize_reasoning_result",
     "strip_payload_metadata",
 ]
+
+
+_FRAMEWORK_ID_PATTERN = re.compile(r"(?<![A-Z0-9])EF-\d{2}(?!\d)", re.IGNORECASE)
 
 
 def summarize_rag_result(rag_result: Any) -> dict[str, Any]:
@@ -23,6 +29,13 @@ def summarize_rag_result(rag_result: Any) -> dict[str, Any]:
 
     for doc in rag_result.retrieved_documents:
         entry = {
+            "framework_id": extract_framework_id(
+                {
+                    "title": doc.title,
+                    "path": doc.path,
+                    "content": doc.full_content,
+                }
+            ),
             "title": doc.title,
             "path": doc.path,
             "score": doc.score,
@@ -36,6 +49,13 @@ def summarize_rag_result(rag_result: Any) -> dict[str, Any]:
 
     fallback_docs = [
         {
+            "framework_id": extract_framework_id(
+                {
+                    "title": doc.title,
+                    "path": doc.path,
+                    "content": doc.content,
+                }
+            ),
             "title": doc.title,
             "path": doc.path,
             "score": "fallback",
@@ -64,6 +84,41 @@ def summarize_reasoning_result(reasoning_result: Any) -> dict[str, Any]:
     payload = reasoning_result.to_dict()
     payload.pop("system_prompt", None)
     return payload
+
+
+def extract_framework_id(value: str | dict[str, Any] | None) -> str | None:
+    if value is None:
+        return None
+
+    candidates: list[Any] = []
+    if isinstance(value, dict):
+        for key in ("framework_id", "id", "title", "path", "source", "name", "content", "excerpt"):
+            candidates.append(value.get(key))
+    else:
+        candidates.append(value)
+
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        if isinstance(candidate, dict):
+            nested = extract_framework_id(candidate)
+            if nested is not None:
+                return nested
+            continue
+        text = str(candidate)
+        if text.strip().startswith("{"):
+            try:
+                payload = json.loads(text)
+            except json.JSONDecodeError:
+                payload = None
+            if isinstance(payload, dict):
+                nested = extract_framework_id(payload)
+                if nested is not None:
+                    return nested
+        match = _FRAMEWORK_ID_PATTERN.search(text)
+        if match:
+            return match.group(0).upper()
+    return None
 
 
 def build_summary_payload(

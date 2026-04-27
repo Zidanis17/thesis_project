@@ -105,6 +105,25 @@ class MathematicalLayerTests(unittest.TestCase):
         self.assertIn("potential_right_of_way_violation:obj_01", flags_by_action["swerve_left"])
         self.assertIn("steers_into_occluded_zone:left_sidewalk", flags_by_action["swerve_left"])
 
+    def test_scenario_bank_canonical_values_and_maintain_lane_are_supported(self) -> None:
+        payload = build_sample_payload()
+        payload["environment"]["road_type"] = "urban_arterial"
+        payload["environment"]["weather"] = "light_rain"
+        payload["obstacles"][0]["trajectory"] = "same_lane_braking"
+        payload["available_actions"] = ["maintain_lane", "brake_straight"]
+        scenario = self.parser.parse(payload).scenario
+
+        result = self.math_layer.analyze(scenario)
+
+        self.assertIn("maintain_lane", result.risk_score_matrix)
+        self.assertEqual(result.global_metrics["canonical_weather"], "rain")
+        self.assertEqual(result.global_metrics["canonical_road_type"], "urban")
+
+    def test_vru_type_overrides_low_vulnerability_class_for_protection_mapping(self) -> None:
+        self.assertFalse(self.math_layer._is_protected("low", "adult_pedestrian"))
+        self.assertFalse(self.math_layer._is_protected("low", "motorcyclist"))
+        self.assertFalse(self.math_layer._is_protected("high", "vehicle_sedan"))
+
     def test_pipeline_runs_from_natural_language_input(self) -> None:
         text = (
             "An autonomous vehicle weighing 1800 kg is traveling at 60 km/h in the center lane on a "

@@ -10,6 +10,7 @@ __all__ = [
     "SHOWCASE_EXAMPLES",
     "SHOWCASE_SUBDIVISIONS",
     "get_examples_by_subdivision",
+    "get_scenario_bank_examples",
 ]
 
 
@@ -166,3 +167,7 @@ SHOWCASE_SUBDIVISIONS: list[dict[str, Any]] = _build_subdivisions(_JSON_EXAMPLES
 
 def get_examples_by_subdivision(subdivision_id: str) -> list[dict[str, Any]]:
     return [example for example in _JSON_EXAMPLES if example.get("subdivision_id") == subdivision_id]
+
+
+def get_scenario_bank_examples() -> list[dict[str, Any]]:
+    return list(_JSON_EXAMPLES)

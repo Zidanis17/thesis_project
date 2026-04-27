@@ -242,6 +242,37 @@ class DeterministicMathematicalLayer:
         "storm": 1.18,
     }
 
+    WEATHER_CANONICAL_MAP = {
+        "light_rain": "rain",
+        "overcast": "clear",
+    }
+
+    ROAD_TYPE_CANONICAL_MAP = {
+        "urban_arterial": "urban",
+        "residential_street": "residential",
+        "urban_intersection": "intersection",
+        "ring_road": "highway",
+        "highway_merge": "highway",
+        "hospital_access_road": "hospital_zone",
+    }
+
+    TRAJECTORY_CANONICAL_MAP = {
+        "same_lane_braking": "same_lane",
+        "same_lane_edge": "same_lane",
+        "same_lane_stationary": "stationary",
+        "lawful_crosswalk": "crossing",
+        "crossing_jaywalking": "crossing",
+        "crossing_from_between_parked_cars": "crossing",
+        "merge_from_ramp": "merging",
+        "partial_lane_obstruction": "stationary",
+        "right_shoulder_stationary": "stationary",
+        "right_edge_barrier": "stationary",
+        "left_edge_barrier": "stationary",
+        "left_fixed_barrier": "stationary",
+        "right_side_fixed": "stationary",
+        "adjacent_left_lane_moving": "same_lane",
+    }
+
     # Protection classification follows Geisslinger et al. (2023):
     # "our model distinguishes between protected (vehicles, trucks) and
     #  unprotected (pedestrians, cyclists) road users" (Methods section).
@@ -256,9 +287,15 @@ class DeterministicMathematicalLayer:
     VULNERABILITY_TO_PROTECTED: dict[str, bool] = {
         # --- Unprotected road users (VRUs) [Geisslinger et al. 2023] ---
         "high": False,
+        "child": False,
+        "elderly": False,
         "pedestrian": False,
         "pedestrian_adult": False,
+        "adult_pedestrian": False,
+        "child_pedestrian": False,
+        "elderly_pedestrian": False,
         "cyclist": False,
+        "motorcyclist": False,
         "hidden_pedestrian": False,
         "hidden_cyclist": False,
 
@@ -409,6 +446,32 @@ class DeterministicMathematicalLayer:
                 "bike lane": 0.55,
                 "left lane": 0.05,
                 "right lane": 0.75,
+                "intersection": 0.35,
+            },
+        },
+        "maintain_lane": {
+            "speed_factor": 1.00,
+            "trajectory_likelihood_multiplier": {
+                "stationary": 0.95,
+                "same_lane": 0.95,
+                "crossing": 0.95,
+                "oncoming": 0.90,
+                "merging": 0.85,
+            },
+            "impact_angles": {
+                "stationary": 5.0,
+                "same_lane": 0.0,
+                "crossing": 25.0,
+                "oncoming": 175.0,
+                "merging": 20.0,
+            },
+            "occlusion_exposure": {
+                "left sidewalk": 0.10,
+                "right sidewalk": 0.10,
+                "crosswalk": 0.35,
+                "bike lane": 0.20,
+                "left lane": 0.05,
+                "right lane": 0.05,
                 "intersection": 0.35,
             },
         },
@@ -580,17 +643,17 @@ class DeterministicMathematicalLayer:
             scenario=scenario,
             global_metrics=global_metrics,
         )
-        trajectory = obstacle.trajectory.lower()
+        trajectory = self._canonical_trajectory(obstacle.trajectory)
         likelihood_multiplier = profile["trajectory_likelihood_multiplier"].get(trajectory, 0.75)
         collision_likelihood = _clamp(base_likelihood * likelihood_multiplier)
 
         impact_speed_mps = self._impact_speed_mps(
             scenario.ego_vehicle.speed_kmh,
             profile["speed_factor"],
-            scenario.environment.weather,
+            self._canonical_weather(scenario.environment.weather),
         )
         impact_angle_deg = profile["impact_angles"].get(trajectory, 35.0)
-        protected = self.VULNERABILITY_TO_PROTECTED.get(obstacle.vulnerability_class, True)
+        protected = self._is_protected(obstacle.vulnerability_class, obstacle.type)
 
         # Δv for each party — Equation 1, Geisslinger et al. (2023)
         ego_delta_v, obs_delta_v = self._calc_delta_v(
@@ -666,10 +729,10 @@ class DeterministicMathematicalLayer:
         impact_speed_mps = self._impact_speed_mps(
             scenario.ego_vehicle.speed_kmh,
             profile["speed_factor"],
-            scenario.environment.weather,
+            self._canonical_weather(scenario.environment.weather),
         )
         impact_angle_deg = profile["impact_angles"].get(zone_profile["trajectory"], 40.0)
-        protected = self.VULNERABILITY_TO_PROTECTED.get(zone_profile["vulnerability_class"], True)
+        protected = self._is_protected(zone_profile["vulnerability_class"], zone_profile["stakeholder_type"])
 
         # Δv — Equation 1, Geisslinger et al. (2023)
         ego_delta_v, obs_delta_v = self._calc_delta_v(
@@ -1030,7 +1093,7 @@ class DeterministicMathematicalLayer:
 
         # Minor additive terms for road condition and scene complexity.
         # No specific literature mapping; included for physical plausibility.
-        weather_pressure = self.WEATHER_PRESSURE.get(scenario.environment.weather, 0.15)
+        weather_pressure = self.WEATHER_PRESSURE.get(self._canonical_weather(scenario.environment.weather), 0.15)
         traffic_pressure = self.TRAFFIC_PRESSURE.get(scenario.environment.traffic_density, 0.45)
 
         # Unavoidable-collision flag: small additive bonus when the scenario
@@ -1131,6 +1194,8 @@ class DeterministicMathematicalLayer:
             "scene_uncertainty": round(scene_uncertainty, 3),
             "speed_limit_delta_kmh": round(speed_limit_delta_kmh, 3),
             "visibility_pressure": round(visibility_pressure, 3),
+            "canonical_weather": self._canonical_weather(scenario.environment.weather),
+            "canonical_road_type": self._canonical_road_type(scenario.environment.road_type),
             "closest_obstacle_distance_m": (
                 round(closest_obstacle_distance_m, 3)
                 if closest_obstacle_distance_m != float("inf") else None
@@ -1165,6 +1230,34 @@ class DeterministicMathematicalLayer:
 
     def _action_profile(self, action: str) -> dict[str, Any]:
         return self.ACTION_PROFILES.get(action, self.ACTION_PROFILES["brake_straight"])
+
+    def _canonical_weather(self, weather: str) -> str:
+        value = weather.strip().lower()
+        return self.WEATHER_CANONICAL_MAP.get(value, value)
+
+    def _canonical_road_type(self, road_type: str) -> str:
+        value = road_type.strip().lower()
+        return self.ROAD_TYPE_CANONICAL_MAP.get(value, value)
+
+    def _canonical_trajectory(self, trajectory: str) -> str:
+        value = trajectory.strip().lower()
+        return self.TRAJECTORY_CANONICAL_MAP.get(value, value)
+
+    def _is_protected(self, vulnerability_class: str, stakeholder_type: str | None = None) -> bool:
+        vulnerability_key = vulnerability_class.strip().lower()
+        if self.VULNERABILITY_TO_PROTECTED.get(vulnerability_key) is False:
+            return False
+        if stakeholder_type:
+            type_key = stakeholder_type.strip().lower()
+            if self.VULNERABILITY_TO_PROTECTED.get(type_key) is False:
+                return False
+        if vulnerability_key in self.VULNERABILITY_TO_PROTECTED:
+            return self.VULNERABILITY_TO_PROTECTED[vulnerability_key]
+        if stakeholder_type:
+            type_key = stakeholder_type.strip().lower()
+            if type_key in self.VULNERABILITY_TO_PROTECTED:
+                return self.VULNERABILITY_TO_PROTECTED[type_key]
+        return self.VULNERABILITY_TO_PROTECTED.get(vulnerability_key, True)
 
     def _canonicalize_zone(self, zone: str) -> str:
         return zone.strip().lower().replace("_", " ")

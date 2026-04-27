@@ -975,7 +975,7 @@ html, body, #root {
 
 .subdivision-summary-row {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
@@ -991,6 +991,13 @@ html, body, #root {
   flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 16px;
+}
+
+.evaluation-export-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 18px;
 }
 
 .expectation-panel {
@@ -1109,6 +1116,14 @@ html, body, #root {
   border-collapse: collapse;
   min-width: 520px;
   background: var(--bg-2);
+}
+
+.confusion-table {
+  min-width: 860px;
+}
+
+.scenario-results-table {
+  min-width: 1180px;
 }
 
 .subdivision-table th,

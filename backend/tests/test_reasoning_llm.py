@@ -240,6 +240,11 @@ class ReasoningLLMTests(unittest.TestCase):
         self.assertNotIn("input_mode", prompt)
         self.assertNotIn("parser_warnings", prompt)
 
+    def test_reasoning_defaults_and_prompt_match_thesis_configuration(self) -> None:
+        self.assertEqual(EthicalReasoningLLM.DEFAULT_MODEL_NAME, "gpt-5.4-mini")
+        self.assertIn("ego_vehicle, passenger, or occupant risk", ETHICAL_REASONING_SYSTEM_PROMPT)
+        self.assertNotIn('"ego:passenger" plus', ETHICAL_REASONING_SYSTEM_PROMPT)
+
     def test_pipeline_includes_reasoning_result_when_engine_is_supplied(self) -> None:
         pipeline = ScenarioPipeline(reasoning_llm=FakeReasoningEngine())
 

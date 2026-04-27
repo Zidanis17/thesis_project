@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import Counter
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from time import perf_counter
 from typing import Any, Literal
 
@@ -14,15 +15,18 @@ from ..scenario_parser import DeterministicScenarioParser, ScenarioParseError
 from .serializers import (
     build_summary_payload,
     coerce_input_snapshot,
+    extract_framework_id,
     summarize_rag_result,
     summarize_reasoning_result,
     strip_payload_metadata,
 )
 
 InputModeHint = Literal["auto", "json", "text"]
+EvaluationVariant = Literal["full_system", "no_rag"]
 
 __all__ = [
     "InputModeHint",
+    "EvaluationVariant",
     "ScenarioDomainError",
     "ShowcaseRuntime",
 ]
@@ -37,6 +41,17 @@ _FRAMEWORK_LABELS: dict[str, str] = {
     "EF-06": "Virtue Ethics",
 }
 _UNRESOLVED_FRAMEWORK_KEY = "__unresolved__"
+_VALID_DOMINANT_FRAMEWORKS = {"EF-01", "EF-02", "EF-03", "EF-05", "EF-06"}
+_CONFUSION_LABELS = [
+    "EF-01",
+    "EF-02",
+    "EF-03",
+    "EF-05",
+    "EF-06",
+    "EF-04_invalid",
+    "unresolved",
+    "other_invalid",
+]
 
 
 class ScenarioDomainError(ValueError):
@@ -100,7 +115,13 @@ class ShowcaseRuntime:
             "warnings": warnings,
         }
 
-    def run(self, payload: str | dict[str, Any], input_mode_hint: InputModeHint = "auto") -> dict[str, Any]:
+    def run(
+        self,
+        payload: str | dict[str, Any],
+        input_mode_hint: InputModeHint = "auto",
+        *,
+        disable_rag: bool = False,
+    ) -> dict[str, Any]:
         replay: list[dict[str, Any]] = []
         started_at = perf_counter()
 
@@ -232,7 +253,9 @@ class ShowcaseRuntime:
         rag_headline = "RAG stage skipped."
         rag_metrics: dict[str, Any] = {}
 
-        if self.rag_retriever is not None:
+        if disable_rag:
+            rag_payload = {"runtime_status": "not_requested", "reason": "RAG stage disabled for evaluation variant."}
+        elif self.rag_retriever is not None:
             try:
                 rag_result = self.rag_retriever.retrieve(parser_result.scenario, math_result)
                 rag_payload = summarize_rag_result(rag_result)
@@ -390,6 +413,7 @@ class ShowcaseRuntime:
         *,
         subdivision: dict[str, Any],
         examples: list[dict[str, Any]],
+        variant: EvaluationVariant = "full_system",
     ) -> dict[str, Any]:
         subdivision_id = str(subdivision["id"])
         if not examples:
@@ -403,114 +427,542 @@ class ShowcaseRuntime:
                 }
             )
 
+        evaluation = self._run_evaluation(
+            examples=examples,
+            scope="subdivision",
+            variant=variant,
+            subdivision=subdivision,
+        )
+        return {
+            **evaluation,
+            "subdivision": {
+                **subdivision,
+                "scenario_count": len(examples),
+            },
+        }
+
+    def run_scenario_bank(
+        self,
+        *,
+        examples: list[dict[str, Any]],
+        variant: EvaluationVariant = "full_system",
+    ) -> dict[str, Any]:
+        if not examples:
+            raise ScenarioDomainError(
+                {
+                    "error": {
+                        "code": "empty_scenario_bank",
+                        "message": "No JSON scenarios were found in the scenario bank.",
+                    },
+                    "replay": [],
+                }
+            )
+
+        return self._run_evaluation(
+            examples=examples,
+            scope="full_bank",
+            variant=variant,
+            subdivision=None,
+        )
+
+    def _run_evaluation(
+        self,
+        *,
+        examples: list[dict[str, Any]],
+        scope: Literal["subdivision", "full_bank"],
+        variant: EvaluationVariant,
+        subdivision: dict[str, Any] | None,
+    ) -> dict[str, Any]:
         started_at = perf_counter()
         scenario_results: list[dict[str, Any]] = []
-        framework_counts: Counter[str] = Counter()
-        completed_runs = 0
-        reasoning_runtime_ready = 0
-        rag_runtime_ready = 0
 
         for example in examples:
             scenario_started = perf_counter()
             try:
-                result = self.run(example["value"], example.get("mode", "auto"))
-                summary = result["summary"]
-                duration_ms = max(1, int(round((perf_counter() - scenario_started) * 1000)))
-                dominant_framework = summary.get("dominant_framework")
-                framework_key = dominant_framework or _UNRESOLVED_FRAMEWORK_KEY
-                framework_counts[framework_key] += 1
-                completed_runs += 1
-
-                if summary.get("reasoning_runtime_available"):
-                    reasoning_runtime_ready += 1
-                if summary.get("rag_runtime_available"):
-                    rag_runtime_ready += 1
-
-                scenario_results.append(
-                    {
-                        "scenario_id": example["id"],
-                        "scenario_label": example["label"],
-                        "subdivision_id": example.get("subdivision_id"),
-                        "subdivision_label": example.get("subdivision_label"),
-                        "expected_framework": example.get("expected_framework"),
-                        "status": "success",
-                        "duration_ms": duration_ms,
-                        "deterministic_best_action": summary.get("deterministic_best_action"),
-                        "dominant_framework": dominant_framework,
-                        "reasoning_runtime_available": summary.get("reasoning_runtime_available", False),
-                        "rag_runtime_available": summary.get("rag_runtime_available", False),
-                        "error_code": None,
-                        "error_message": None,
-                    }
+                result = self.run(
+                    example["value"],
+                    example.get("mode", "auto"),
+                    disable_rag=variant == "no_rag",
                 )
+                duration_ms = max(1, int(round((perf_counter() - scenario_started) * 1000)))
+                scenario_results.append(_scenario_evaluation_result(example, result, duration_ms=duration_ms))
             except ScenarioDomainError as exc:
                 duration_ms = max(1, int(round((perf_counter() - scenario_started) * 1000)))
                 error = exc.payload.get("error", {})
-                framework_counts[_UNRESOLVED_FRAMEWORK_KEY] += 1
+                scenario_results.append(_failed_scenario_evaluation_result(example, duration_ms=duration_ms, error=error))
+            except Exception as exc:
+                duration_ms = max(1, int(round((perf_counter() - scenario_started) * 1000)))
                 scenario_results.append(
-                    {
-                        "scenario_id": example["id"],
-                        "scenario_label": example["label"],
-                        "subdivision_id": example.get("subdivision_id"),
-                        "subdivision_label": example.get("subdivision_label"),
-                        "expected_framework": example.get("expected_framework"),
-                        "status": "error",
-                        "duration_ms": duration_ms,
-                        "deterministic_best_action": None,
-                        "dominant_framework": None,
-                        "reasoning_runtime_available": False,
-                        "rag_runtime_available": False,
-                        "error_code": error.get("code"),
-                        "error_message": error.get("message"),
-                    }
+                    _failed_scenario_evaluation_result(
+                        example,
+                        duration_ms=duration_ms,
+                        error={
+                            "code": "scenario_run_error",
+                            "message": str(exc),
+                        },
+                    )
                 )
 
         total_scenarios = len(examples)
-        failed_runs = total_scenarios - completed_runs
         total_duration_ms = max(1, int(round((perf_counter() - started_at) * 1000)))
-
-        framework_distribution: list[dict[str, Any]] = []
-        for framework_key, count in framework_counts.most_common():
-            framework_id = None if framework_key == _UNRESOLVED_FRAMEWORK_KEY else framework_key
-            framework_distribution.append(
-                {
-                    "framework_id": framework_id,
-                    "framework_label": (
-                        "Unresolved / Unavailable"
-                        if framework_id is None
-                        else _FRAMEWORK_LABELS.get(framework_id, framework_id)
-                    ),
-                    "count": count,
-                    "percentage": round((count / total_scenarios) * 100, 1) if total_scenarios else 0.0,
-                }
-            )
-
-        top_framework = framework_distribution[0] if framework_distribution else None
+        summary = _evaluation_summary(
+            scenario_results,
+            total_duration_ms=total_duration_ms,
+        )
 
         return {
-            "subdivision": {
-                **subdivision,
-                "scenario_count": total_scenarios,
-            },
-            "summary": {
-                "scenario_count": total_scenarios,
-                "completed_runs": completed_runs,
-                "failed_runs": failed_runs,
-                "completion_rate_pct": round((completed_runs / total_scenarios) * 100, 1) if total_scenarios else 0.0,
-                "reasoning_runtime_ready_pct": (
-                    round((reasoning_runtime_ready / total_scenarios) * 100, 1) if total_scenarios else 0.0
-                ),
-                "rag_runtime_ready_pct": (
-                    round((rag_runtime_ready / total_scenarios) * 100, 1) if total_scenarios else 0.0
-                ),
-                "top_framework": top_framework["framework_id"] if top_framework else None,
-                "top_framework_label": top_framework["framework_label"] if top_framework else None,
-                "top_framework_percentage": top_framework["percentage"] if top_framework else 0.0,
-                "total_duration_ms": total_duration_ms,
-            },
-            "framework_distribution": framework_distribution,
+            "evaluation_id": None,
+            "created_at": _utc_now(),
+            "scope": scope,
+            "variant": variant,
+            "subdivision_id": subdivision.get("id") if subdivision else None,
+            "subdivision_label": subdivision.get("label") if subdivision else None,
+            "total_scenarios": summary["scenario_count"],
+            "completed_runs": summary["completed_runs"],
+            "failed_runs": summary["failed_runs"],
+            "completion_rate_pct": summary["completion_rate_pct"],
+            "correct_predictions": summary["correct_predictions"],
+            "incorrect_predictions": summary["incorrect_predictions"],
+            "overall_accuracy_pct": summary["accuracy_pct"],
+            "total_duration_ms": total_duration_ms,
+            "expected_framework_distribution": _framework_distribution(
+                scenario_results,
+                key="expected_framework",
+            ),
+            "framework_distribution": _framework_distribution(
+                scenario_results,
+                key="dominant_framework",
+            ),
+            "per_framework_accuracy": _per_framework_accuracy(scenario_results),
+            "confusion_matrix": _confusion_matrix(scenario_results),
+            "rag_retrieval_hit_rate_pct": summary["rag_retrieval_hit_rate_pct"],
+            "reasoning_contract_validity_rate_pct": summary["reasoning_contract_validity_rate_pct"],
+            "risk_matrix_preservation_rate_pct": summary["risk_matrix_preservation_rate_pct"],
+            "weights_validity_rate_pct": summary["weights_validity_rate_pct"],
+            "summary": summary,
             "scenario_results": scenario_results,
         }
+
+
+def _scenario_evaluation_result(
+    example: dict[str, Any],
+    pipeline_payload: dict[str, Any],
+    *,
+    duration_ms: int,
+) -> dict[str, Any]:
+    summary = pipeline_payload.get("summary", {})
+    if not isinstance(summary, dict):
+        summary = {}
+    artifacts = pipeline_payload.get("artifacts", {})
+    if not isinstance(artifacts, dict):
+        artifacts = {}
+    rag_payload = artifacts.get("rag_retrieval_result", {})
+    if not isinstance(rag_payload, dict):
+        rag_payload = {}
+    reasoning_payload = artifacts.get("reasoning_result", {})
+    if not isinstance(reasoning_payload, dict):
+        reasoning_payload = {}
+    math_payload = artifacts.get("mathematical_layer_result", {})
+    if not isinstance(math_payload, dict):
+        math_payload = {}
+
+    expected_framework = _clean_framework_id(example.get("expected_framework"))
+    dominant_framework = _clean_framework_id(summary.get("dominant_framework"))
+    retrieval_metrics = _retrieval_metrics_from_rag_payload(rag_payload, expected_framework)
+    contract_checks = _reasoning_contract_checks(reasoning_payload, math_payload)
+    confidence = _coerce_float(reasoning_payload.get("confidence"))
+
+    correct_prediction = (
+        expected_framework == dominant_framework
+        if expected_framework is not None and dominant_framework is not None
+        else False
+    )
+
+    return {
+        "scenario_id": example["id"],
+        "scenario_label": example["label"],
+        "subdivision_id": example.get("subdivision_id"),
+        "subdivision_label": example.get("subdivision_label"),
+        "expected_framework": expected_framework,
+        "dominant_framework": dominant_framework,
+        "correct_prediction": correct_prediction,
+        "confidence": confidence,
+        "contributing_frameworks": _string_list(reasoning_payload.get("contributing_frameworks")),
+        "weights": reasoning_payload.get("weights") if isinstance(reasoning_payload.get("weights"), dict) else {},
+        "retrieved_framework_ids": retrieval_metrics["retrieved_framework_ids"],
+        "expected_framework_retrieved": retrieval_metrics["expected_framework_retrieved"],
+        "top_retrieved_framework": retrieval_metrics["top_retrieved_framework"],
+        "top_retrieval_score": retrieval_metrics["top_retrieval_score"],
+        "reasoning_contract_valid": contract_checks["reasoning_contract_valid"],
+        "dominant_framework_valid": contract_checks["dominant_framework_valid"],
+        "weights_sum_to_one": contract_checks["weights_sum_to_one"],
+        "risk_matrix_preserved": contract_checks["risk_matrix_preserved"],
+        "no_recommended_action": contract_checks["no_recommended_action"],
+        "violated_constraints_supported": contract_checks["violated_constraints_supported"],
+        "deterministic_best_action": summary.get("deterministic_best_action"),
+        "status": "success",
+        "duration_ms": duration_ms,
+        "reasoning_runtime_available": summary.get("reasoning_runtime_available", False),
+        "rag_runtime_available": summary.get("rag_runtime_available", False),
+        "error_code": None,
+        "error_message": None,
+    }
+
+
+def _failed_scenario_evaluation_result(
+    example: dict[str, Any],
+    *,
+    duration_ms: int,
+    error: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "scenario_id": example["id"],
+        "scenario_label": example["label"],
+        "subdivision_id": example.get("subdivision_id"),
+        "subdivision_label": example.get("subdivision_label"),
+        "expected_framework": _clean_framework_id(example.get("expected_framework")),
+        "dominant_framework": None,
+        "correct_prediction": False,
+        "confidence": None,
+        "contributing_frameworks": [],
+        "weights": {},
+        "retrieved_framework_ids": [],
+        "expected_framework_retrieved": False,
+        "top_retrieved_framework": None,
+        "top_retrieval_score": None,
+        "reasoning_contract_valid": False,
+        "dominant_framework_valid": False,
+        "weights_sum_to_one": False,
+        "risk_matrix_preserved": False,
+        "no_recommended_action": False,
+        "violated_constraints_supported": False,
+        "deterministic_best_action": None,
+        "status": "error",
+        "duration_ms": duration_ms,
+        "reasoning_runtime_available": False,
+        "rag_runtime_available": False,
+        "error_code": error.get("code"),
+        "error_message": error.get("message"),
+    }
+
+
+def _retrieval_metrics_from_rag_payload(
+    rag_payload: dict[str, Any],
+    expected_framework: str | None,
+) -> dict[str, Any]:
+    frameworks = rag_payload.get("frameworks", [])
+    retrieved_framework_ids: list[str] = []
+    top_retrieved_framework: str | None = None
+    top_retrieval_score: float | None = None
+
+    if isinstance(frameworks, list):
+        for index, framework in enumerate(frameworks):
+            framework_id = extract_framework_id(framework)
+            if framework_id is not None and framework_id not in retrieved_framework_ids:
+                retrieved_framework_ids.append(framework_id)
+            if index == 0:
+                top_retrieved_framework = framework_id
+                if isinstance(framework, dict):
+                    top_retrieval_score = _coerce_float(framework.get("score"))
+
+    return {
+        "retrieved_framework_ids": retrieved_framework_ids,
+        "expected_framework_retrieved": (
+            expected_framework in retrieved_framework_ids if expected_framework is not None else False
+        ),
+        "top_retrieved_framework": top_retrieved_framework,
+        "top_retrieval_score": top_retrieval_score,
+    }
+
+
+def _reasoning_contract_checks(
+    reasoning_payload: dict[str, Any],
+    mathematical_layer_payload: dict[str, Any],
+) -> dict[str, bool]:
+    dominant_framework = _clean_framework_id(reasoning_payload.get("dominant_framework"))
+    dominant_framework_valid = dominant_framework in _VALID_DOMINANT_FRAMEWORKS
+    weights_sum_to_one = _weights_sum_to_one(reasoning_payload.get("weights"))
+    risk_matrix_preserved = _risk_matrix_preserved(
+        reasoning_payload.get("risk_scores_per_action"),
+        mathematical_layer_payload.get("risk_score_matrix"),
+    )
+    no_recommended_action = "recommended_action" not in reasoning_payload
+    violated_constraints_supported = _violated_constraints_supported(
+        reasoning_payload.get("violated_constraints"),
+        mathematical_layer_payload,
+    )
+    reasoning_runtime_available = bool(reasoning_payload.get("runtime_available", False))
+    reasoning_contract_valid = all(
+        (
+            reasoning_runtime_available,
+            dominant_framework_valid,
+            weights_sum_to_one,
+            risk_matrix_preserved,
+            no_recommended_action,
+            violated_constraints_supported,
+        )
+    )
+
+    return {
+        "reasoning_contract_valid": reasoning_contract_valid,
+        "dominant_framework_valid": dominant_framework_valid,
+        "weights_sum_to_one": weights_sum_to_one,
+        "risk_matrix_preserved": risk_matrix_preserved,
+        "no_recommended_action": no_recommended_action,
+        "violated_constraints_supported": violated_constraints_supported,
+    }
+
+
+def _weights_sum_to_one(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    total = 0.0
+    for key in ("bayesian", "equality", "maximin"):
+        numeric = _coerce_float(value.get(key))
+        if numeric is None:
+            return False
+        total += numeric
+    return abs(total - 1.0) <= 0.01
+
+
+def _risk_matrix_preserved(reasoning_matrix: Any, math_matrix: Any, *, tolerance: float = 1e-6) -> bool:
+    if not isinstance(reasoning_matrix, dict) or not isinstance(math_matrix, dict):
+        return False
+    if set(reasoning_matrix) != set(math_matrix):
+        return False
+    for action, expected_scores in math_matrix.items():
+        actual_scores = reasoning_matrix.get(action)
+        if not isinstance(actual_scores, dict) or not isinstance(expected_scores, dict):
+            return False
+        if set(actual_scores) != set(expected_scores):
+            return False
+        for stakeholder_id, expected_value in expected_scores.items():
+            actual_value = _coerce_float(actual_scores.get(stakeholder_id))
+            expected_numeric = _coerce_float(expected_value)
+            if actual_value is None or expected_numeric is None:
+                return False
+            if abs(actual_value - expected_numeric) > tolerance:
+                return False
+    return True
+
+
+def _violated_constraints_supported(value: Any, mathematical_layer_payload: dict[str, Any]) -> bool:
+    if value is None:
+        value = []
+    if not isinstance(value, list):
+        return False
+
+    supported = set(_string_list(mathematical_layer_payload.get("violated_rules")))
+    action_assessments = mathematical_layer_payload.get("action_assessments", [])
+    if isinstance(action_assessments, list):
+        for assessment in action_assessments:
+            if isinstance(assessment, dict):
+                supported.update(_string_list(assessment.get("constraint_flags")))
+
+    for constraint in value:
+        if not isinstance(constraint, str) or constraint not in supported:
+            return False
+    return True
+
+
+def _evaluation_summary(
+    scenario_results: list[dict[str, Any]],
+    *,
+    total_duration_ms: int,
+) -> dict[str, Any]:
+    total_scenarios = len(scenario_results)
+    completed_runs = sum(1 for result in scenario_results if result.get("status") == "success")
+    failed_runs = total_scenarios - completed_runs
+    correct_predictions = sum(1 for result in scenario_results if result.get("correct_prediction") is True)
+    incorrect_predictions = total_scenarios - correct_predictions
+    reasoning_runtime_ready = sum(1 for result in scenario_results if result.get("reasoning_runtime_available") is True)
+    rag_runtime_ready = sum(1 for result in scenario_results if result.get("rag_runtime_available") is True)
+    rag_hits = sum(1 for result in scenario_results if result.get("expected_framework_retrieved") is True)
+    risk_preserved = sum(1 for result in scenario_results if result.get("risk_matrix_preserved") is True)
+    contract_valid = sum(1 for result in scenario_results if result.get("reasoning_contract_valid") is True)
+    weights_valid = sum(1 for result in scenario_results if result.get("weights_sum_to_one") is True)
+
+    framework_distribution = _framework_distribution(scenario_results, key="dominant_framework")
+    top_framework = framework_distribution[0] if framework_distribution else None
+    expected_counter = Counter(
+        result.get("expected_framework")
+        for result in scenario_results
+        if result.get("expected_framework")
+    )
+    expected_framework, expected_framework_total = (
+        expected_counter.most_common(1)[0] if expected_counter else (None, 0)
+    )
+
+    confidence_values = [_coerce_float(result.get("confidence")) for result in scenario_results]
+    correct_confidence_values = [
+        _coerce_float(result.get("confidence"))
+        for result in scenario_results
+        if result.get("correct_prediction") is True
+    ]
+    incorrect_confidence_values = [
+        _coerce_float(result.get("confidence"))
+        for result in scenario_results
+        if result.get("correct_prediction") is not True
+    ]
+
+    return {
+        "scenario_count": total_scenarios,
+        "completed_runs": completed_runs,
+        "failed_runs": failed_runs,
+        "completion_rate_pct": _pct(completed_runs, total_scenarios),
+        "correct_predictions": correct_predictions,
+        "incorrect_predictions": incorrect_predictions,
+        "accuracy_pct": _pct(correct_predictions, total_scenarios),
+        "expected_framework": expected_framework,
+        "expected_framework_total": expected_framework_total,
+        "average_confidence": _average(confidence_values),
+        "average_confidence_correct": _average(correct_confidence_values),
+        "average_confidence_incorrect": _average(incorrect_confidence_values),
+        "reasoning_runtime_ready_pct": _pct(reasoning_runtime_ready, total_scenarios),
+        "rag_runtime_ready_pct": _pct(rag_runtime_ready, total_scenarios),
+        "rag_retrieval_hit_rate_pct": _pct(rag_hits, total_scenarios),
+        "risk_matrix_preservation_rate_pct": _pct(risk_preserved, total_scenarios),
+        "reasoning_contract_validity_rate_pct": _pct(contract_valid, total_scenarios),
+        "weights_validity_rate_pct": _pct(weights_valid, total_scenarios),
+        "top_framework": top_framework["framework_id"] if top_framework else None,
+        "top_framework_label": top_framework["framework_label"] if top_framework else None,
+        "top_framework_percentage": top_framework["percentage"] if top_framework else 0.0,
+        "total_duration_ms": total_duration_ms,
+    }
+
+
+def _framework_distribution(
+    scenario_results: list[dict[str, Any]],
+    *,
+    key: str,
+) -> list[dict[str, Any]]:
+    total_scenarios = len(scenario_results)
+    counts: Counter[str] = Counter()
+    for result in scenario_results:
+        framework_key = _distribution_key(result.get(key))
+        counts[framework_key] += 1
+
+    distribution: list[dict[str, Any]] = []
+    for framework_key, count in counts.most_common():
+        framework_id = None if framework_key == _UNRESOLVED_FRAMEWORK_KEY else framework_key
+        distribution.append(
+            {
+                "framework_id": framework_id,
+                "framework_label": _framework_label(framework_id),
+                "count": count,
+                "percentage": _pct(count, total_scenarios),
+            }
+        )
+    return distribution
+
+
+def _per_framework_accuracy(scenario_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    metrics: list[dict[str, Any]] = []
+    for framework_id in sorted(_VALID_DOMINANT_FRAMEWORKS):
+        expected_count = sum(1 for result in scenario_results if result.get("expected_framework") == framework_id)
+        correct_count = sum(
+            1
+            for result in scenario_results
+            if result.get("expected_framework") == framework_id and result.get("correct_prediction") is True
+        )
+        incorrect_count = expected_count - correct_count
+        metrics.append(
+            {
+                "framework_id": framework_id,
+                "expected_count": expected_count,
+                "correct_count": correct_count,
+                "incorrect_count": incorrect_count,
+                "accuracy_pct": _pct(correct_count, expected_count),
+            }
+        )
+    return metrics
+
+
+def _confusion_matrix(scenario_results: list[dict[str, Any]]) -> dict[str, Any]:
+    rows: list[dict[str, Any]] = []
+    for expected_label in _CONFUSION_LABELS:
+        predictions = {label: 0 for label in _CONFUSION_LABELS}
+        for result in scenario_results:
+            if _confusion_bucket(result.get("expected_framework")) != expected_label:
+                continue
+            predictions[_confusion_bucket(result.get("dominant_framework"))] += 1
+        rows.append(
+            {
+                "expected": expected_label,
+                "predictions": predictions,
+            }
+        )
+    return {
+        "labels": list(_CONFUSION_LABELS),
+        "rows": rows,
+    }
+
+
+def _confusion_bucket(value: Any) -> str:
+    framework_id = _clean_framework_id(value)
+    if framework_id is None:
+        return "unresolved"
+    if framework_id == "EF-04":
+        return "EF-04_invalid"
+    if framework_id in _VALID_DOMINANT_FRAMEWORKS:
+        return framework_id
+    return "other_invalid"
+
+
+def _distribution_key(value: Any) -> str:
+    framework_id = _clean_framework_id(value)
+    return framework_id if framework_id else _UNRESOLVED_FRAMEWORK_KEY
+
+
+def _framework_label(framework_id: str | None) -> str:
+    if framework_id is None:
+        return "Unresolved / Unavailable"
+    if framework_id == "EF-04_invalid":
+        return "EF-04 used as invalid dominant framework"
+    if framework_id == "other_invalid":
+        return "Other invalid framework"
+    if framework_id == "unresolved":
+        return "Unresolved / Unavailable"
+    return _FRAMEWORK_LABELS.get(framework_id, framework_id)
+
+
+def _clean_framework_id(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    if not stripped:
+        return None
+    return stripped.upper()
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
+
+
+def _coerce_float(value: Any) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _average(values: list[float | None]) -> float | None:
+    numeric_values = [value for value in values if value is not None]
+    if not numeric_values:
+        return None
+    return round(sum(numeric_values) / len(numeric_values), 3)
+
+
+def _pct(numerator: int, denominator: int) -> float:
+    return round((numerator / denominator) * 100, 1) if denominator else 0.0
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def _prepare_input(payload: str | dict[str, Any], input_mode_hint: InputModeHint) -> str | dict[str, Any]:

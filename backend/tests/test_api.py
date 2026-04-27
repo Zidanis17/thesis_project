@@ -7,6 +7,12 @@ from fastapi.testclient import TestClient
 
 from thesis import EthicalReasoningResult
 from thesis.api import ShowcaseRuntime, create_app
+from thesis.api.runner import (
+    _confusion_matrix,
+    _per_framework_accuracy,
+    _reasoning_contract_checks,
+    _retrieval_metrics_from_rag_payload,
+)
 from thesis.api.storage import ScenarioRunStore
 from thesis.rag import RAGRetrievalResult, RetrievedDocument
 
@@ -207,14 +213,206 @@ def test_subdivision_batch_run_returns_framework_distribution() -> None:
     assert payload["summary"]["scenario_count"] == 35
     assert payload["summary"]["completed_runs"] == 35
     assert payload["summary"]["failed_runs"] == 0
+    assert payload["summary"]["correct_predictions"] == 35
+    assert payload["summary"]["incorrect_predictions"] == 0
+    assert payload["summary"]["accuracy_pct"] == 100.0
+    assert payload["summary"]["rag_retrieval_hit_rate_pct"] == 100.0
+    assert payload["summary"]["reasoning_contract_validity_rate_pct"] == 100.0
+    assert payload["summary"]["risk_matrix_preservation_rate_pct"] == 100.0
+    assert payload["summary"]["weights_validity_rate_pct"] == 100.0
     assert payload["summary"]["top_framework"] == "EF-02"
     assert payload["framework_distribution"][0]["framework_id"] == "EF-02"
     assert payload["framework_distribution"][0]["percentage"] == 100.0
+    assert payload["per_framework_accuracy"][1]["framework_id"] == "EF-02"
+    assert payload["per_framework_accuracy"][1]["accuracy_pct"] == 100.0
+    assert payload["confusion_matrix"]["labels"] == [
+        "EF-01",
+        "EF-02",
+        "EF-03",
+        "EF-05",
+        "EF-06",
+        "EF-04_invalid",
+        "unresolved",
+        "other_invalid",
+    ]
     assert payload["subdivision"]["expectation"]["expected_dominant_framework"] == "EF-02"
     assert payload["subdivision"]["expectation"]["critical_evaluation_rule"].startswith(
         "A prediction is correct when the dominant framework"
     )
     assert len(payload["scenario_results"]) == 35
+    first_result = payload["scenario_results"][0]
+    assert first_result["correct_prediction"] is True
+    assert first_result["confidence"] == 0.91
+    assert first_result["retrieved_framework_ids"] == ["EF-02"]
+    assert first_result["expected_framework_retrieved"] is True
+    assert first_result["risk_matrix_preserved"] is True
+    assert first_result["weights_sum_to_one"] is True
+    assert first_result["reasoning_contract_valid"] is True
+
+
+def test_full_scenario_bank_run_returns_evaluation_response() -> None:
+    client = build_client()
+
+    response = client.post("/api/v1/scenario/bank/run", json={"variant": "full_system"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["evaluation_id"]
+    assert payload["scope"] == "full_bank"
+    assert payload["variant"] == "full_system"
+    assert payload["total_scenarios"] == 100
+    assert payload["completed_runs"] == 100
+    assert payload["failed_runs"] == 0
+    assert payload["correct_predictions"] == 35
+    assert payload["incorrect_predictions"] == 65
+    assert payload["overall_accuracy_pct"] == 35.0
+    assert len(payload["scenario_results"]) == 100
+    assert payload["scenario_results"][0]["scenario_id"].startswith("sc_")
+    assert payload["scenario_results"][0]["expected_framework"] == "EF-02"
+    assert payload["expected_framework_distribution"]
+    assert payload["framework_distribution"]
+    assert payload["per_framework_accuracy"]
+    assert payload["confusion_matrix"]["rows"]
+
+
+def test_evaluation_runs_are_persisted_listed_and_fetchable() -> None:
+    client = build_client()
+
+    run_response = client.post(
+        "/api/v1/scenario/subdivision/run",
+        json={"subdivision_id": "routine_rule_governed"},
+    )
+
+    assert run_response.status_code == 200
+    run_payload = run_response.json()
+    evaluation_id = run_payload["evaluation_id"]
+
+    history_response = client.get("/api/v1/evaluations")
+
+    assert history_response.status_code == 200
+    history_payload = history_response.json()
+    assert history_payload["total_runs"] == 1
+    assert history_payload["subdivision_runs"] == 1
+    assert history_payload["full_bank_runs"] == 0
+    assert history_payload["runs"][0]["id"] == evaluation_id
+    assert history_payload["runs"][0]["overall_accuracy_pct"] == 100.0
+
+    detail_response = client.get(f"/api/v1/evaluations/{evaluation_id}")
+
+    assert detail_response.status_code == 200
+    detail_payload = detail_response.json()
+    assert detail_payload["evaluation_id"] == evaluation_id
+    assert detail_payload["scope"] == "subdivision"
+    assert detail_payload["summary"]["accuracy_pct"] == 100.0
+
+
+def test_confusion_matrix_buckets_invalid_unresolved_and_unknown_predictions() -> None:
+    rows = [
+        {"expected_framework": "EF-01", "dominant_framework": "EF-01", "correct_prediction": True},
+        {"expected_framework": "EF-01", "dominant_framework": "EF-04", "correct_prediction": False},
+        {"expected_framework": "EF-02", "dominant_framework": None, "correct_prediction": False},
+        {"expected_framework": "EF-03", "dominant_framework": "EF-99", "correct_prediction": False},
+    ]
+
+    matrix = _confusion_matrix(rows)
+
+    by_expected = {row["expected"]: row["predictions"] for row in matrix["rows"]}
+    assert by_expected["EF-01"]["EF-01"] == 1
+    assert by_expected["EF-01"]["EF-04_invalid"] == 1
+    assert by_expected["EF-02"]["unresolved"] == 1
+    assert by_expected["EF-03"]["other_invalid"] == 1
+
+
+def test_per_framework_accuracy_uses_expected_framework_counts() -> None:
+    rows = [
+        {"expected_framework": "EF-01", "dominant_framework": "EF-01", "correct_prediction": True},
+        {"expected_framework": "EF-01", "dominant_framework": "EF-03", "correct_prediction": False},
+        {"expected_framework": "EF-03", "dominant_framework": "EF-03", "correct_prediction": True},
+    ]
+
+    metrics = {metric["framework_id"]: metric for metric in _per_framework_accuracy(rows)}
+
+    assert metrics["EF-01"]["expected_count"] == 2
+    assert metrics["EF-01"]["correct_count"] == 1
+    assert metrics["EF-01"]["incorrect_count"] == 1
+    assert metrics["EF-01"]["accuracy_pct"] == 50.0
+    assert metrics["EF-03"]["accuracy_pct"] == 100.0
+
+
+def test_rag_hit_rate_metrics_are_derived_from_framework_ids() -> None:
+    metrics = _retrieval_metrics_from_rag_payload(
+        {
+            "frameworks": [
+                {
+                    "title": "Rawlsian Maximin",
+                    "path": "ethical_frameworks/EF-03_maximin.json",
+                    "score": 0.88,
+                },
+                {
+                    "title": "Utilitarian Risk Minimization",
+                    "path": "ethical_frameworks/Ef-01_utilitarian.json",
+                    "score": 0.76,
+                },
+            ]
+        },
+        "EF-01",
+    )
+
+    assert metrics["retrieved_framework_ids"] == ["EF-03", "EF-01"]
+    assert metrics["expected_framework_retrieved"] is True
+    assert metrics["top_retrieved_framework"] == "EF-03"
+    assert metrics["top_retrieval_score"] == 0.88
+
+
+def test_reasoning_contract_checks_validate_risk_matrix_weights_and_constraints() -> None:
+    math_payload = {
+        "risk_score_matrix": {
+            "brake_straight": {"ego_vehicle": 0.1, "obj_01": 0.2},
+            "swerve_left": {"ego_vehicle": 0.3, "obj_01": 0.1},
+        },
+        "violated_rules": ["speed_limit_exceeded"],
+        "action_assessments": [
+            {"constraint_flags": ["potential_right_of_way_violation:obj_01"]},
+        ],
+    }
+    reasoning_payload = {
+        "runtime_available": True,
+        "dominant_framework": "EF-01",
+        "weights": {"bayesian": 0.4, "equality": 0.2, "maximin": 0.4},
+        "risk_scores_per_action": {
+            "brake_straight": {"ego_vehicle": 0.1, "obj_01": 0.2},
+            "swerve_left": {"ego_vehicle": 0.3, "obj_01": 0.1},
+        },
+        "violated_constraints": ["potential_right_of_way_violation:obj_01"],
+    }
+
+    checks = _reasoning_contract_checks(reasoning_payload, math_payload)
+
+    assert checks["dominant_framework_valid"] is True
+    assert checks["weights_sum_to_one"] is True
+    assert checks["risk_matrix_preserved"] is True
+    assert checks["no_recommended_action"] is True
+    assert checks["violated_constraints_supported"] is True
+    assert checks["reasoning_contract_valid"] is True
+
+    bad_checks = _reasoning_contract_checks(
+        {
+            **reasoning_payload,
+            "dominant_framework": "EF-04",
+            "weights": {"bayesian": 0.7, "equality": 0.2, "maximin": 0.2},
+            "risk_scores_per_action": {"brake_straight": {"ego_vehicle": 0.9, "obj_01": 0.2}},
+            "recommended_action": "brake_straight",
+            "violated_constraints": ["unsupported"],
+        },
+        math_payload,
+    )
+
+    assert bad_checks["dominant_framework_valid"] is False
+    assert bad_checks["weights_sum_to_one"] is False
+    assert bad_checks["risk_matrix_preserved"] is False
+    assert bad_checks["no_recommended_action"] is False
+    assert bad_checks["violated_constraints_supported"] is False
+    assert bad_checks["reasoning_contract_valid"] is False
 
 
 def test_json_request_returns_replay_and_artifacts() -> None:
