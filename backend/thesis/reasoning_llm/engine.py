@@ -69,6 +69,12 @@ class EthicalReasoningLLM:
         "avoid_when",
         "dominant_when",
     )
+    PRIORITY_VRU_TOKENS = (
+        "child",
+        "elderly",
+        "cyclist",
+        "motorcyclist",
+    )
 
     def __init__(
         self,
@@ -128,6 +134,8 @@ class EthicalReasoningLLM:
             return self._build_result(
                 payload=payload,
                 risk_scores_per_action=risk_scores_per_action,
+                parser_result=parser_result,
+                mathematical_layer_result=mathematical_layer_result,
             )
         except Exception as exc:
             return EthicalReasoningResult(
@@ -147,8 +155,6 @@ class EthicalReasoningLLM:
         scenario = parser_result.scenario
         
         prompt_payload = {
-            "input_mode": parser_result.input_mode,
-            "parser_warnings": list(parser_result.warnings),
             "scenario": scenario.to_dict(),
             "mathematical_layer": mathematical_layer_result.to_dict(),
             "rag_context": self._rag_context_payload(rag_retrieval_result, scenario),
@@ -254,6 +260,8 @@ class EthicalReasoningLLM:
         *,
         payload: dict[str, Any],
         risk_scores_per_action: dict[str, dict[str, float]],
+        parser_result: ParserResult,
+        mathematical_layer_result: MathematicalLayerResult,
     ) -> EthicalReasoningResult:
         contributing_frameworks = self._framework_list(
             payload.get("contributing_frameworks", [])
@@ -261,6 +269,8 @@ class EthicalReasoningLLM:
         dominant_framework = self._dominant_framework(
             payload.get("dominant_framework"),
             contributing_frameworks=contributing_frameworks,
+            parser_result=parser_result,
+            mathematical_layer_result=mathematical_layer_result,
         )
         weights = self._normalize_weights(payload.get("weights"))
         weights_reasoning = self._required_text(
@@ -350,19 +360,183 @@ class EthicalReasoningLLM:
         value: Any,
         *,
         contributing_frameworks: list[str],
+        parser_result: ParserResult,
+        mathematical_layer_result: MathematicalLayerResult,
     ) -> str:
         candidate = self._canonical_framework(value, field_name="dominant_framework")
-        if candidate in self.DOMINANT_FRAMEWORKS:
+        if self._is_allowed_dominant_framework(
+            candidate,
+            parser_result=parser_result,
+            mathematical_layer_result=mathematical_layer_result,
+        ):
             return candidate
 
+        heuristic_choice = self._heuristic_dominant_framework(
+            parser_result=parser_result,
+            mathematical_layer_result=mathematical_layer_result,
+        )
+        if self._is_allowed_dominant_framework(
+            heuristic_choice,
+            parser_result=parser_result,
+            mathematical_layer_result=mathematical_layer_result,
+        ):
+            return heuristic_choice
+
         for framework in contributing_frameworks:
-            if framework in self.DOMINANT_FRAMEWORKS:
+            if self._is_allowed_dominant_framework(
+                framework,
+                parser_result=parser_result,
+                mathematical_layer_result=mathematical_layer_result,
+            ):
                 return framework
 
         raise ValueError(
             "dominant_framework cannot be EF-04 (ethics_of_risk); "
             "use EF-01, EF-02, EF-03, EF-05, or EF-06"
         )
+
+    def _is_allowed_dominant_framework(
+        self,
+        framework: str,
+        *,
+        parser_result: ParserResult,
+        mathematical_layer_result: MathematicalLayerResult,
+    ) -> bool:
+        if framework not in self.DOMINANT_FRAMEWORKS:
+            return False
+
+        scenario = parser_result.scenario
+        global_metrics = mathematical_layer_result.global_metrics
+
+        if self._requires_virtue_fallback(parser_result):
+            return framework == "EF-06"
+
+        if not bool(global_metrics.get("scene_interpretable", True)):
+            return framework == "EF-06"
+
+        if not scenario.collision_unavoidable:
+            return framework == "EF-02"
+
+        if framework == "EF-02":
+            return False
+
+        if framework == "EF-05":
+            return self._has_passenger_valence_signal(
+                parser_result=parser_result,
+                mathematical_layer_result=mathematical_layer_result,
+            )
+
+        return framework in {"EF-01", "EF-03", "EF-06"}
+
+    def _heuristic_dominant_framework(
+        self,
+        *,
+        parser_result: ParserResult,
+        mathematical_layer_result: MathematicalLayerResult,
+    ) -> str:
+        scenario = parser_result.scenario
+        global_metrics = mathematical_layer_result.global_metrics
+
+        if self._requires_virtue_fallback(parser_result):
+            return "EF-06"
+
+        if not bool(global_metrics.get("scene_interpretable", True)):
+            return "EF-06"
+
+        if not scenario.collision_unavoidable:
+            return "EF-02"
+
+        if self._has_passenger_valence_signal(
+            parser_result=parser_result,
+            mathematical_layer_result=mathematical_layer_result,
+        ):
+            return "EF-05"
+
+        if self._has_priority_vru(scenario):
+            return "EF-03"
+
+        return "EF-01"
+
+    def _requires_virtue_fallback(self, parser_result: ParserResult) -> bool:
+        return any("unknown" in obstacle.type.lower() for obstacle in parser_result.scenario.obstacles)
+
+    def _has_priority_vru(self, scenario: Scenario) -> bool:
+        for obstacle in scenario.obstacles:
+            type_name = obstacle.type.lower()
+            vulnerability = obstacle.vulnerability_class.lower()
+            if any(token in type_name for token in self.PRIORITY_VRU_TOKENS):
+                return True
+            if any(token in vulnerability for token in self.PRIORITY_VRU_TOKENS):
+                return True
+        return False
+
+    def _has_passenger_valence_signal(
+        self,
+        *,
+        parser_result: ParserResult,
+        mathematical_layer_result: MathematicalLayerResult,
+    ) -> bool:
+        return self._risk_matrix_shows_passenger_vru_tradeoff(
+            parser_result=parser_result,
+            mathematical_layer_result=mathematical_layer_result,
+        )
+
+    def _risk_matrix_shows_passenger_vru_tradeoff(
+        self,
+        *,
+        parser_result: ParserResult,
+        mathematical_layer_result: MathematicalLayerResult,
+    ) -> bool:
+        risk_score_matrix = mathematical_layer_result.risk_score_matrix
+        if not risk_score_matrix:
+            return False
+        if not all("ego:passenger" in scores for scores in risk_score_matrix.values()):
+            return False
+
+        vru_stakeholder_ids = self._vru_stakeholder_ids(parser_result.scenario)
+        if not vru_stakeholder_ids:
+            return False
+
+        passenger_scores = {
+            action: float(scores.get("ego:passenger", 0.0))
+            for action, scores in risk_score_matrix.items()
+        }
+        vru_scores = {
+            action: round(
+                sum(float(scores.get(stakeholder_id, 0.0)) for stakeholder_id in vru_stakeholder_ids),
+                3,
+            )
+            for action, scores in risk_score_matrix.items()
+        }
+
+        best_passenger_action = min(
+            passenger_scores.items(),
+            key=lambda item: (item[1], item[0]),
+        )[0]
+        best_vru_action = min(
+            vru_scores.items(),
+            key=lambda item: (item[1], item[0]),
+        )[0]
+        passenger_gap = max(passenger_scores.values()) - min(passenger_scores.values())
+        vru_gap = max(vru_scores.values()) - min(vru_scores.values())
+
+        return (
+            best_passenger_action != best_vru_action
+            and passenger_gap > 0.01
+            and vru_gap > 0.01
+        )
+
+    def _vru_stakeholder_ids(self, scenario: Scenario) -> list[str]:
+        stakeholder_ids: list[str] = []
+        for obstacle in scenario.obstacles:
+            type_name = obstacle.type.lower()
+            vulnerability = obstacle.vulnerability_class.lower()
+            if any(
+                token in type_name or token in vulnerability
+                for token in ("pedestrian", "child", "elderly", "cyclist", "motorcyclist")
+            ):
+                stakeholder_ids.append(obstacle.id)
+        return stakeholder_ids
 
     def _framework_list(self, value: Any) -> list[str]:
         if not isinstance(value, list):

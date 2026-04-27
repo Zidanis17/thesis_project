@@ -144,6 +144,41 @@ class ScenarioParserTests(unittest.TestCase):
         self.assertEqual(result.input_mode, "structured_json")
         self.assertEqual(result.scenario.environment.road_type, "urban")
 
+    def test_structured_meta_is_ignored_by_parser_output(self) -> None:
+        payload = {
+            "ego_vehicle": {
+                "speed_kmh": 40,
+                "acceleration_ms2": -4.0,
+            },
+            "environment": {
+                "road_type": "urban",
+            },
+            "obstacles": [
+                {
+                    "type": "vehicle",
+                    "distance_m": 15,
+                }
+            ],
+            "_meta": {
+                "warnings": [
+                    "passenger-protection and third-party protection create explicit valence trade-off",
+                    "distinct stakeholder categories make social valence central",
+                ]
+            },
+        }
+
+        result = self.parser.parse(payload)
+
+        self.assertNotIn("_meta", result.to_dict())
+        self.assertNotIn(
+            "passenger-protection and third-party protection create explicit valence trade-off",
+            result.warnings,
+        )
+        self.assertNotIn(
+            "distinct stakeholder categories make social valence central",
+            result.warnings,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

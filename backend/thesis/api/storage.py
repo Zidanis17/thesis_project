@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
+from .payload import strip_payload_metadata
+
 RunStatus = Literal["success", "error"]
 
 DEFAULT_RUNS_DB_PATH = (Path(__file__).resolve().parents[2] / "data" / "scenario_runs.sqlite3").resolve()
@@ -111,6 +113,7 @@ class ScenarioRunStore:
         status: RunStatus,
         model_name: str | None,
     ) -> StoredRunRecord:
+        stored_input = strip_payload_metadata(request_input)
         summary = payload.get("summary", {})
         error = payload.get("error", {})
         replay = payload.get("replay", [])
@@ -122,7 +125,7 @@ class ScenarioRunStore:
             input_mode_hint=input_mode_hint,
             resolved_input_mode=summary.get("input_mode"),
             submitted_kind="json" if isinstance(request_input, dict) else "text",
-            input_preview=_build_input_preview(request_input),
+            input_preview=_build_input_preview(stored_input),
             model_name=model_name,
             deterministic_best_action=summary.get("deterministic_best_action"),
             dominant_framework=summary.get("dominant_framework"),
@@ -172,7 +175,7 @@ class ScenarioRunStore:
                     record.error_code,
                     record.error_message,
                     record.replay_stage_count,
-                    _dump_json(request_input),
+                    _dump_json(stored_input),
                     _dump_json(payload),
                 ),
             )

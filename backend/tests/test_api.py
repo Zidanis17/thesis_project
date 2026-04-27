@@ -186,6 +186,11 @@ def test_examples_endpoint_returns_seed_examples() -> None:
     assert any(item.get("subdivision_label") for item in payload["examples"] if item["mode"] == "json")
     assert payload["subdivisions"][0]["expectation"]["expected_dominant_framework"] == "EF-02"
     assert payload["subdivisions"][0]["expectation"]["decision_principle"] == "Rule compliance"
+    assert all(
+        "_meta" not in item["value"]
+        for item in payload["examples"]
+        if isinstance(item["value"], dict)
+    )
 
 
 def test_subdivision_batch_run_returns_framework_distribution() -> None:
@@ -225,7 +230,8 @@ def test_json_request_returns_replay_and_artifacts() -> None:
     assert payload["run"]["status"] == "success"
     assert payload["run"]["model_name"] == "fake-ethical-model"
     assert payload["summary"]["deterministic_best_action"] == "brake_straight"
-    assert payload["artifacts"]["parser_result"]["_meta"]["input_mode"] == "structured_json"
+    assert payload["summary"]["input_mode"] == "structured_json"
+    assert "_meta" not in payload["artifacts"]["parser_result"]
     assert [stage["stage_id"] for stage in payload["replay"]] == [
         "input",
         "parser",
@@ -247,8 +253,36 @@ def test_natural_language_request_returns_parser_derived_json() -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["artifacts"]["parser_result"]["_meta"]["input_mode"] == "natural_language"
+    assert payload["summary"]["input_mode"] == "natural_language"
+    assert "_meta" not in payload["artifacts"]["parser_result"]
     assert payload["artifacts"]["parser_result"]["environment"]["road_type"] == "residential"
+
+
+def test_metadata_is_stripped_before_replay_and_artifacts() -> None:
+    client = build_client()
+    request_payload = {
+        **build_sample_payload(),
+        "_meta": {
+            "input_mode": "sensor_fusion",
+            "warnings": ["metadata should not enter the pipeline payload"],
+        },
+    }
+
+    response = client.post(
+        "/api/v1/scenario/run",
+        json={"input": request_payload, "input_mode_hint": "json"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "_meta" not in payload["replay"][0]["snapshot"]["input"]["submitted"]
+    assert "_meta" not in payload["replay"][1]["snapshot"]["parser_result"]
+    assert "_meta" not in payload["artifacts"]["parser_result"]
+    assert "metadata should not enter the pipeline payload" not in payload["summary"]["parser_warnings"]
+
+    detail_response = client.get(f"/api/v1/scenario/runs/{payload['run']['id']}")
+    assert detail_response.status_code == 200
+    assert "_meta" not in detail_response.json()["input"]
 
 
 def test_parser_validation_error_returns_400_with_partial_replay() -> None:

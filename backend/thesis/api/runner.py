@@ -16,6 +16,7 @@ from .serializers import (
     coerce_input_snapshot,
     summarize_rag_result,
     summarize_reasoning_result,
+    strip_payload_metadata,
 )
 
 InputModeHint = Literal["auto", "json", "text"]
@@ -514,7 +515,7 @@ class ShowcaseRuntime:
 
 def _prepare_input(payload: str | dict[str, Any], input_mode_hint: InputModeHint) -> str | dict[str, Any]:
     if input_mode_hint == "auto":
-        return payload
+        return strip_payload_metadata(payload)
 
     if input_mode_hint == "text":
         if isinstance(payload, str):
@@ -541,7 +542,7 @@ def _prepare_input(payload: str | dict[str, Any], input_mode_hint: InputModeHint
         )
 
     if isinstance(payload, dict):
-        return payload
+        return strip_payload_metadata(payload)
     if not isinstance(payload, str):
         raise ScenarioDomainError(
             {
@@ -576,7 +577,7 @@ def _prepare_input(payload: str | dict[str, Any], input_mode_hint: InputModeHint
                 "replay": [],
             }
         )
-    return decoded
+    return strip_payload_metadata(decoded)
 
 
 def _stage(
@@ -645,11 +646,11 @@ def _diff_paths(previous: Any, current: Any, path: str = "") -> list[str]:
 
 def _input_headline(payload: str | dict[str, Any]) -> str:
     if isinstance(payload, dict):
-        return f"Received structured JSON with {len(payload)} top-level field(s)."
+        return f"Received structured JSON with {len(strip_payload_metadata(payload))} top-level field(s)."
     return f"Received natural-language input ({len(payload)} characters)."
 
 
 def _input_metrics(payload: str | dict[str, Any]) -> dict[str, Any]:
     if isinstance(payload, dict):
-        return {"submitted_kind": "json", "top_level_fields": len(payload)}
+        return {"submitted_kind": "json", "top_level_fields": len(strip_payload_metadata(payload))}
     return {"submitted_kind": "text", "characters": len(payload)}

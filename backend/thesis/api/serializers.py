@@ -3,12 +3,14 @@ from __future__ import annotations
 from typing import Any
 
 from ..pipeline import ScenarioPipelineResult
+from .payload import strip_payload_metadata
 
 __all__ = [
     "build_summary_payload",
     "coerce_input_snapshot",
     "summarize_rag_result",
     "summarize_reasoning_result",
+    "strip_payload_metadata",
 ]
 
 
@@ -90,5 +92,5 @@ def coerce_input_snapshot(payload: Any, *, input_mode_hint: str) -> dict[str, An
     return {
         "input_mode_hint": input_mode_hint,
         "submitted_kind": submitted_kind,
-        "submitted": payload,
+        "submitted": strip_payload_metadata(payload),
     }

@@ -133,11 +133,112 @@ class ReasoningLLMTests(unittest.TestCase):
         result = engine.reason(self.parser_result, self.math_result)
 
         self.assertTrue(result.runtime_available)
-        self.assertEqual(result.dominant_framework, "EF-02")
+        self.assertEqual(result.dominant_framework, "EF-03")
         self.assertEqual(result.weights, {"bayesian": 0.5, "equality": 0.25, "maximin": 0.25})
         self.assertEqual(result.risk_scores_per_action, self.math_result.risk_score_matrix)
         self.assertFalse(hasattr(result, "recommended_action"))
         self.assertEqual(result.violated_constraints, [])
+
+    def test_unavoidable_collision_rejects_ef02_as_dominant_framework(self) -> None:
+        engine = EthicalReasoningLLM.__new__(EthicalReasoningLLM)
+        engine.model_name = "gpt-4-nano"
+        engine.temperature = 0.0
+        engine.system_prompt = ETHICAL_REASONING_SYSTEM_PROMPT
+        engine._runtime_error = None
+        engine.client = FakeClient(
+            {
+                "dominant_framework": "EF-02",
+                "contributing_frameworks": ["EF-01", "EF-03"],
+                "weights": {
+                    "bayesian": 0.4,
+                    "equality": 0.2,
+                    "maximin": 0.4,
+                },
+                "weights_reasoning": "The model attempted to over-privilege deontological constraints.",
+                "risk_scores_per_action": {"tampered": {"value": 999}},
+                "rationale": "The response incorrectly prefers EF-02 for an unavoidable collision.",
+                "confidence": 0.75,
+                "violated_constraints": [],
+            }
+        )
+
+        result = engine.reason(self.parser_result, self.math_result)
+
+        self.assertEqual(result.dominant_framework, "EF-03")
+
+    def test_ef05_requires_explicit_passenger_valence_signal(self) -> None:
+        engine = EthicalReasoningLLM.__new__(EthicalReasoningLLM)
+        engine.model_name = "gpt-4-nano"
+        engine.temperature = 0.0
+        engine.system_prompt = ETHICAL_REASONING_SYSTEM_PROMPT
+        engine._runtime_error = None
+        engine.client = FakeClient(
+            {
+                "dominant_framework": "EF-05",
+                "contributing_frameworks": ["EF-01", "EF-03"],
+                "weights": {
+                    "bayesian": 0.3,
+                    "equality": 0.2,
+                    "maximin": 0.5,
+                },
+                "weights_reasoning": "The model tried to infer a passenger dilemma without evidence.",
+                "risk_scores_per_action": {"tampered": {"value": 999}},
+                "rationale": "The response incorrectly elevates EF-05 without a passenger-valence signal.",
+                "confidence": 0.71,
+                "violated_constraints": [],
+            }
+        )
+
+        result = engine.reason(self.parser_result, self.math_result)
+
+        self.assertEqual(result.dominant_framework, "EF-03")
+
+    def test_structured_meta_does_not_enable_ef05(self) -> None:
+        payload = {
+            **build_sample_payload(),
+            "_meta": {
+                "warnings": [
+                    "passenger-protection and third-party protection create explicit valence trade-off",
+                    "distinct stakeholder categories make social valence central",
+                ]
+            },
+        }
+        parser_result = self.parser.parse(payload)
+        math_result = self.math_layer.analyze(parser_result.scenario)
+
+        engine = EthicalReasoningLLM.__new__(EthicalReasoningLLM)
+        engine.model_name = "gpt-4-nano"
+        engine.temperature = 0.0
+        engine.system_prompt = ETHICAL_REASONING_SYSTEM_PROMPT
+        engine._runtime_error = None
+        engine.client = FakeClient(
+            {
+                "dominant_framework": "EF-05",
+                "contributing_frameworks": ["EF-01", "EF-03"],
+                "weights": {
+                    "bayesian": 0.4,
+                    "equality": 0.3,
+                    "maximin": 0.3,
+                },
+                "weights_reasoning": "The scenario metadata explicitly marks a passenger-vs-third-party dilemma.",
+                "risk_scores_per_action": {"tampered": {"value": 999}},
+                "rationale": "The response selects EF-05 when the structured scenario carries a valence cue.",
+                "confidence": 0.86,
+                "violated_constraints": [],
+            }
+        )
+
+        result = engine.reason(parser_result, math_result)
+
+        self.assertEqual(result.dominant_framework, "EF-03")
+
+    def test_user_prompt_excludes_parser_metadata(self) -> None:
+        engine = EthicalReasoningLLM.__new__(EthicalReasoningLLM)
+        prompt = engine._build_user_prompt(self.parser_result, self.math_result, None)
+
+        self.assertNotIn("_meta", prompt)
+        self.assertNotIn("input_mode", prompt)
+        self.assertNotIn("parser_warnings", prompt)
 
     def test_pipeline_includes_reasoning_result_when_engine_is_supplied(self) -> None:
         pipeline = ScenarioPipeline(reasoning_llm=FakeReasoningEngine())

@@ -166,9 +166,4 @@ class ParserResult:
     warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        payload = self.scenario.to_dict()
-        payload["_meta"] = {
-            "input_mode": self.input_mode,
-            "warnings": list(self.warnings),
-        }
-        return payload
+        return self.scenario.to_dict()

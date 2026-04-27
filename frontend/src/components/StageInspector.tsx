@@ -26,8 +26,8 @@ const STAGE_GUIDE: Record<
   }
 > = {
   input: {
-    receives: 'The backend receives the raw submission exactly as it was entered in the editor.',
-    transforms: 'It wraps that payload with metadata so the rest of the pipeline knows what kind of input arrived.',
+    receives: 'The backend receives the submitted scenario from the editor.',
+    transforms: 'It records the submission shape so the rest of the pipeline knows what kind of input arrived.',
     produces: 'The replay baseline becomes the reference point for every later stage.',
   },
   parser: {

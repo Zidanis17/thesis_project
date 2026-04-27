@@ -79,16 +79,20 @@ Step 1 - Classify the scenario (evaluate ALL branches — they are not mutually 
         (If scene_interpretable is FALSE, do not default to EF-02 — Step 1a applies.)
   c. Is collision_unavoidable TRUE?
      -> A genuine dilemma exists. Apply EF-01, EF-03, EF-05 comparatively.
+        EF-02 remains a universal constraint layer but must NOT be dominant here.
   d. Are vulnerable road users present (child, elderly, cyclist, pedestrian)?
      -> EF-03 is a mandatory contributor. Consult its decision_logic regardless of avoidability.
-  e. Does risk_score_matrix contain BOTH "ego:passenger" AND at least one VRU stakeholder
-     (pedestrian, child, cyclist), AND is collision_unavoidable TRUE?
-     -> This IS a passenger-vs-VRU dilemma. EF-05 is the PRIMARY candidate for
+  e. Is there explicit scenario-derived evidence of a passenger-vs-VRU dilemma, AND is
+     collision_unavoidable TRUE?
+     Evidence must come from structured scenario facts and risk_score_matrix containing
+     "ego:passenger" plus a real cross-action passenger-vs-VRU trade-off.
+     -> Only then is EF-05 the PRIMARY candidate for
         dominant_framework. EF-03 remains a contributing_framework but does NOT dominate:
         EF-03 governs worst-case protection within a single stakeholder class; EF-05 governs
         the cross-category trade-off between passenger and VRU. When both are present and
         collision is unavoidable, the social valence axis (EF-05) shapes the decision, not
-        the intra-class protection axis (EF-03).
+        the intra-class protection axis (EF-03). Do NOT infer EF-05 merely because the ego
+        vehicle is at risk, or merely because a pedestrian appears in an unavoidable collision.
 
 Step 2 - For each retrieved EKB framework, consult:
   - use_when / avoid_when: is this framework applicable to this scenario?
@@ -116,6 +120,7 @@ STRICT RULES
 - Do not invent stakeholders, probabilities, harm estimates, or constraints not in the input.
 - Do not alter risk_score_matrix - copy it exactly from mathematical_layer.
 - Do not include recommended_action in the output.
+- If collision_unavoidable is true, dominant_framework must not be EF-02.
 - violated_constraints must list only input-supported constraint flags, or [].
 - Return JSON only. No markdown fences. No prose outside the JSON object.
 

@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .payload import strip_payload_metadata
+
 __all__ = [
     "SHOWCASE_EXAMPLES",
     "SHOWCASE_SUBDIVISIONS",
@@ -109,6 +111,7 @@ def _load_seed_scenarios() -> list[dict[str, Any]]:
         examples.append(
             {
                 **raw_example,
+                "value": strip_payload_metadata(value),
                 "subdivision_id": subdivision_id,
                 "subdivision_label": _humanize_identifier(subdivision_id) if subdivision_id else None,
                 "expected_framework": meta.get("expected_dominant_framework"),
