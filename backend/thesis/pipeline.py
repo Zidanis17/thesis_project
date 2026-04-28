@@ -20,15 +20,16 @@ __all__ = [
 @dataclass(slots=True)
 class ScenarioPipelineResult:
     parser_result: ParserResult
-    mathematical_layer_result: MathematicalLayerResult
+    mathematical_layer_result: MathematicalLayerResult | None
     rag_retrieval_result: RAGRetrievalResult | None = None
     reasoning_result: EthicalReasoningResult | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload = {
             "parser_result": self.parser_result.to_dict(),
-            "mathematical_layer_result": self.mathematical_layer_result.to_dict(),
         }
+        if self.mathematical_layer_result is not None:
+            payload["mathematical_layer_result"] = self.mathematical_layer_result.to_dict()
         if self.rag_retrieval_result is not None:
             payload["rag_retrieval_result"] = self.rag_retrieval_result.to_dict()
         if self.reasoning_result is not None:

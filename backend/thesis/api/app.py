@@ -16,6 +16,7 @@ __all__ = ["app", "create_app"]
 class ScenarioRunRequest(BaseModel):
     input: str | dict[str, Any]
     input_mode_hint: InputModeHint = "auto"
+    variant: EvaluationVariant = "full_system"
 
     model_config = ConfigDict(extra="forbid")
 
@@ -72,7 +73,11 @@ def create_app(
     ) -> Any:
         model_name = runtime.reasoning_llm.model_name if runtime.reasoning_llm is not None else None
         try:
-            payload = runtime.run(request_payload.input, request_payload.input_mode_hint)
+            payload = runtime.run(
+                request_payload.input,
+                request_payload.input_mode_hint,
+                variant=request_payload.variant,
+            )
             record = run_store.save_run(
                 request_input=request_payload.input,
                 input_mode_hint=request_payload.input_mode_hint,

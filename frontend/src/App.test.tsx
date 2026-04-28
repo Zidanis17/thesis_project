@@ -287,11 +287,13 @@ function buildRunPayload(overrides?: {
     }),
     summary: {
       input_mode: 'structured_json',
+      variant: 'full_system',
       parser_warnings: [],
       violated_rules: [],
       deterministic_best_action: bestAction,
       dominant_framework: dominantFramework,
       rag_runtime_available: ragRuntimeAvailable,
+      math_runtime_available: true,
       reasoning_runtime_available: reasoningRuntimeAvailable,
       reasoning_runtime_error: reasoningRuntimeAvailable ? null : 'Reasoning unavailable',
       rag_runtime_error: ragRuntimeAvailable ? null : 'RAG unavailable',
@@ -443,6 +445,21 @@ function mockFetch(runPayload = latestRunPayload) {
     if (url.endsWith('/api/v1/scenario/subdivision/run') && init?.method === 'POST') {
       return new Response(JSON.stringify(subdivisionPayload), { status: 200 })
     }
+    if (url.endsWith('/api/v1/scenario/bank/run') && init?.method === 'POST') {
+      const requestPayload = JSON.parse(String(init.body ?? '{}')) as { variant?: string }
+      return new Response(
+        JSON.stringify({
+          ...subdivisionPayload,
+          evaluation_id: 'eval-bank-001',
+          scope: 'full_bank',
+          variant: requestPayload.variant ?? 'full_system',
+          subdivision_id: null,
+          subdivision_label: null,
+          subdivision: undefined,
+        }),
+        { status: 200 },
+      )
+    }
     return new Response('{}', { status: 404 })
   })
 }
@@ -565,6 +582,50 @@ describe('App', () => {
       expect(expectationPanel).toBeInTheDocument()
       expect(expectationPanel).toHaveTextContent('Rule compliance')
       expect(expectationPanel).toHaveTextContent(/dominant framework matches the subdivision expectation/i)
+    })
+  })
+
+  it('passes the selected ablation variant to full-bank evaluation runs', async () => {
+    const fetchMock = mockFetch()
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup()
+
+    render(<App />)
+
+    const variantSelect = await screen.findByLabelText('Pipeline Variant')
+    await user.selectOptions(variantSelect, 'no_rag')
+    await user.click(screen.getByRole('button', { name: 'Run Full Scenario Bank' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('no_rag')).toBeInTheDocument()
+    })
+
+    const bankCall = fetchMock.mock.calls.find(([url, init]) => (
+      String(url).endsWith('/api/v1/scenario/bank/run') && init?.method === 'POST'
+    ))
+    expect(bankCall).toBeTruthy()
+    expect(JSON.parse(String(bankCall?.[1]?.body))).toEqual({ variant: 'no_rag' })
+  })
+
+  it('passes the selected ablation variant to single pipeline runs', async () => {
+    const fetchMock = mockFetch()
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup()
+
+    render(<App />)
+
+    const variantSelect = await screen.findByLabelText('Pipeline Variant')
+    await user.selectOptions(variantSelect, 'no_rag_no_math')
+    await user.click(screen.getByRole('button', { name: 'Run Scenario' }))
+
+    await waitFor(() => {
+      const scenarioCall = fetchMock.mock.calls.find(([url, init]) => (
+        String(url).endsWith('/api/v1/scenario/run') && init?.method === 'POST'
+      ))
+      expect(scenarioCall).toBeTruthy()
+      expect(JSON.parse(String(scenarioCall?.[1]?.body))).toMatchObject({
+        variant: 'no_rag_no_math',
+      })
     })
   })
 

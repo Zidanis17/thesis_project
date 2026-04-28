@@ -17,6 +17,7 @@ import { RunHistoryPanel } from './components/RunHistoryPanel'
 import { SubdivisionMetricsPanel } from './components/SubdivisionMetricsPanel'
 import type {
   ArtifactTabKey,
+  EvaluationVariant,
   EvaluationRunResponse,
   ExampleItem,
   HealthResponse,
@@ -89,6 +90,7 @@ export default function App() {
   const [subdivisions, setSubdivisions] = useState<ScenarioSubdivision[]>([])
   const [selectedExampleId, setSelectedExampleId] = useState<string | null>(null)
   const [selectedSubdivisionId, setSelectedSubdivisionId] = useState<string>('')
+  const [evaluationVariant, setEvaluationVariant] = useState<EvaluationVariant>('full_system')
   const [mode, setMode] = useState<InputEditorMode>('json')
   const [jsonInput, setJsonInput] = useState('{\n  "loading": true\n}')
   const [textInput, setTextInput] = useState('')
@@ -243,7 +245,7 @@ export default function App() {
         }
         payload = trimmed
       }
-      const response = await runScenario(payload, mode)
+      const response = await runScenario(payload, mode, evaluationVariant)
       let historyPayload: ScenarioRunHistoryResponse | null = null
       try {
         historyPayload = await fetchScenarioRunHistory()
@@ -282,7 +284,7 @@ export default function App() {
     setRequestError(null)
     setIsBatchSubmitting(true)
     try {
-      const response = await runSubdivision(selectedSubdivisionId)
+      const response = await runSubdivision(selectedSubdivisionId, evaluationVariant)
       startTransition(() => {
         setEvaluationResult(response)
       })
@@ -298,7 +300,7 @@ export default function App() {
     setRequestError(null)
     setIsBankSubmitting(true)
     try {
-      const response = await runScenarioBank()
+      const response = await runScenarioBank(evaluationVariant)
       startTransition(() => {
         setEvaluationResult(response)
       })
@@ -516,7 +518,7 @@ export default function App() {
                 <div className="subdivision-block">
                   <label htmlFor="subdivision-select" className="block-label">Run Subdivision</label>
                   <p className="subdivision-help">
-                    Execute every scenario in one subdivision, wait for the batch, then compare framework percentages.
+                    Execute evaluation batches with full-system or ablated retrieval settings.
                   </p>
                   <div className="select-wrap">
                     <select
@@ -551,6 +553,28 @@ export default function App() {
                       )}
                     </div>
                   )}
+
+                  <label htmlFor="evaluation-variant-select" className="block-label evaluation-variant-label">
+                    Pipeline Variant
+                  </label>
+                  <div className="select-wrap">
+                    <select
+                      id="evaluation-variant-select"
+                      className="example-select"
+                      value={evaluationVariant}
+                      onChange={(e) => {
+                        setEvaluationVariant(e.target.value as EvaluationVariant)
+                        setEvaluationResult(null)
+                        setBatchError(null)
+                      }}
+                    >
+                      <option value="full_system">Full System</option>
+                      <option value="no_rag">No RAG Ablation</option>
+                      <option value="no_math">No Math Ablation</option>
+                      <option value="no_rag_no_math">No RAG + No Math</option>
+                    </select>
+                    <span className="select-chevron">▾</span>
+                  </div>
                 </div>
               )}
             </div>
@@ -640,7 +664,9 @@ export default function App() {
             <div className="metrics-row">
               <div className="metric-card accent">
                 <span className="metric-label">Deterministic Best</span>
-                <strong className="metric-value">{runEnvelope.payload.summary.deterministic_best_action}</strong>
+                <strong className="metric-value">
+                  {runEnvelope.payload.summary.deterministic_best_action ?? 'Skipped'}
+                </strong>
               </div>
               <div className="metric-card">
                 <span className="metric-label">Dominant Framework</span>
@@ -662,6 +688,11 @@ export default function App() {
           {/* Runtime warnings */}
           {hasSuccessResult && !runEnvelope.payload.summary.rag_runtime_available && (
             <div className="warn-bar">⚠ RAG degraded: {runEnvelope.payload.summary.rag_runtime_error}</div>
+          )}
+          {hasSuccessResult && runEnvelope.payload.summary.math_runtime_available === false && (
+            <div className="warn-bar">
+              Math layer skipped for {runEnvelope.payload.summary.variant ?? 'ablation'}.
+            </div>
           )}
           {hasSuccessResult && !runEnvelope.payload.summary.reasoning_runtime_available && (
             <div className="warn-bar">⚠ Reasoning degraded: {runEnvelope.payload.summary.reasoning_runtime_error}</div>

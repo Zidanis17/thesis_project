@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from time import perf_counter
 from typing import Any, Literal
 
-from ..mathematical_layer import DeterministicMathematicalLayer
+from ..mathematical_layer import DeterministicMathematicalLayer, MathematicalLayerResult
 from ..pipeline import ScenarioPipelineResult
 from ..rag import DeterministicRAGRetriever
 from ..reasoning_llm import EthicalReasoningLLM, EthicalReasoningResult
@@ -22,7 +22,7 @@ from .serializers import (
 )
 
 InputModeHint = Literal["auto", "json", "text"]
-EvaluationVariant = Literal["full_system", "no_rag"]
+EvaluationVariant = Literal["full_system", "no_rag", "no_math", "no_rag_no_math"]
 
 __all__ = [
     "InputModeHint",
@@ -120,8 +120,12 @@ class ShowcaseRuntime:
         payload: str | dict[str, Any],
         input_mode_hint: InputModeHint = "auto",
         *,
-        disable_rag: bool = False,
+        variant: EvaluationVariant = "full_system",
+        disable_rag: bool | None = None,
+        disable_math: bool | None = None,
     ) -> dict[str, Any]:
+        disable_rag = _variant_disables_rag(variant) if disable_rag is None else disable_rag
+        disable_math = _variant_disables_math(variant) if disable_math is None else disable_math
         replay: list[dict[str, Any]] = []
         started_at = perf_counter()
 
@@ -224,24 +228,47 @@ class ShowcaseRuntime:
         snapshot = parser_snapshot
 
         math_started = perf_counter()
-        math_result = self.mathematical_layer.analyze(parser_result.scenario)
-        math_payload = math_result.to_dict()
+        math_result: MathematicalLayerResult | None = None
+        math_status = "skipped"
+        math_headline = "Mathematical layer skipped."
+        math_metrics: dict[str, Any] = {}
+
+        if disable_math:
+            math_payload = {
+                "runtime_status": "not_requested",
+                "reason": "Mathematical layer disabled for evaluation variant.",
+                "risk_score_matrix": None,
+                "violated_rules": [],
+                "action_assessments": [],
+                "best_action_by_total_risk": None,
+                "best_action_by_ethical_cost": None,
+            }
+        else:
+            math_result = self.mathematical_layer.analyze(parser_result.scenario)
+            math_payload = math_result.to_dict()
+            math_status = "success"
+            math_headline = (
+                "Computed action risks. Best deterministic action: "
+                f"{math_result.best_action_by_total_risk}."
+            )
+            math_metrics = {
+                "best_action": math_result.best_action_by_total_risk,
+                "actions": len(math_result.action_assessments),
+                "violations": len(math_result.violated_rules),
+            }
+
         math_snapshot = {**snapshot, "mathematical_layer_result": math_payload}
         replay.append(
             _stage(
                 stage_id="math",
                 label="Math",
-                status="success",
+                status=math_status,
                 started_at=math_started,
                 ended_at=perf_counter(),
-                headline=f"Computed action risks. Best deterministic action: {math_result.best_action_by_total_risk}.",
+                headline=math_headline,
                 snapshot=math_snapshot,
                 previous_snapshot=snapshot,
-                metrics={
-                    "best_action": math_result.best_action_by_total_risk,
-                    "actions": len(math_result.action_assessments),
-                    "violations": len(math_result.violated_rules),
-                },
+                metrics=math_metrics,
             )
         )
         snapshot = math_snapshot
@@ -254,7 +281,15 @@ class ShowcaseRuntime:
         rag_metrics: dict[str, Any] = {}
 
         if disable_rag:
-            rag_payload = {"runtime_status": "not_requested", "reason": "RAG stage disabled for evaluation variant."}
+            rag_payload = {
+                "runtime_available": False,
+                "runtime_status": "not_requested",
+                "reason": "RAG stage disabled for evaluation variant.",
+                "frameworks_retrieved": 0,
+                "supporting_docs_retrieved": 0,
+                "frameworks": [],
+                "supporting_documents": [],
+            }
         elif self.rag_retriever is not None:
             try:
                 rag_result = self.rag_retriever.retrieve(parser_result.scenario, math_result)
@@ -336,7 +371,7 @@ class ShowcaseRuntime:
                     "contributing_frameworks": [],
                     "weights": {},
                     "weights_reasoning": "",
-                    "risk_scores_per_action": math_result.risk_score_matrix,
+                    "risk_scores_per_action": math_result.risk_score_matrix if math_result is not None else {},
                     "rationale": "",
                     "confidence": None,
                     "violated_constraints": [],
@@ -377,6 +412,8 @@ class ShowcaseRuntime:
             rag_payload=rag_payload,
             reasoning_payload=reasoning_payload,
         )
+        summary_payload["variant"] = variant
+        summary_payload["math_runtime_available"] = math_result is not None
         artifacts = {
             "parser_result": parser_payload,
             "mathematical_layer_result": math_payload,
@@ -398,6 +435,7 @@ class ShowcaseRuntime:
                 metrics={
                     "deterministic_best_action": summary_payload.get("deterministic_best_action"),
                     "dominant_framework": summary_payload.get("dominant_framework"),
+                    "variant": variant,
                 },
             )
         )
@@ -482,7 +520,7 @@ class ShowcaseRuntime:
                 result = self.run(
                     example["value"],
                     example.get("mode", "auto"),
-                    disable_rag=variant == "no_rag",
+                    variant=variant,
                 )
                 duration_ms = max(1, int(round((perf_counter() - scenario_started) * 1000)))
                 scenario_results.append(_scenario_evaluation_result(example, result, duration_ms=duration_ms))
@@ -963,6 +1001,14 @@ def _pct(numerator: int, denominator: int) -> float:
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _variant_disables_rag(variant: EvaluationVariant) -> bool:
+    return variant in {"no_rag", "no_rag_no_math"}
+
+
+def _variant_disables_math(variant: EvaluationVariant) -> bool:
+    return variant in {"no_math", "no_rag_no_math"}
 
 
 def _prepare_input(payload: str | dict[str, Any], input_mode_hint: InputModeHint) -> str | dict[str, Any]:

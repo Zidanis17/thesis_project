@@ -80,11 +80,13 @@ def build_sample_text() -> str:
 class FakeRetriever:
     def __init__(self, *, available: bool) -> None:
         self.available = available
+        self.calls = 0
         self.knowledge_base_path = (Path(__file__).resolve().parents[1] / "knowledge_base").resolve()
         self.vector_store = object() if available else None
         self._runtime_error = None if available else RuntimeError("RAG disabled in test")
 
     def retrieve(self, *_args: object, **_kwargs: object) -> RAGRetrievalResult:
+        self.calls += 1
         if self.available:
             retrieved_documents = [
                 RetrievedDocument(
@@ -125,6 +127,7 @@ class FakeReasoner:
         self.model_name = "fake-ethical-model"
 
     def reason(self, _parser_result, math_result, _rag_result) -> EthicalReasoningResult:
+        risk_scores = math_result.risk_score_matrix if math_result is not None else {}
         if self.available:
             return EthicalReasoningResult(
                 model_name=self.model_name,
@@ -134,7 +137,7 @@ class FakeReasoner:
                 contributing_frameworks=["EF-01", "EF-03"],
                 weights={"bayesian": 0.4, "equality": 0.2, "maximin": 0.4},
                 weights_reasoning="Favor the feasible action that protects the vulnerable road user.",
-                risk_scores_per_action=math_result.risk_score_matrix,
+                risk_scores_per_action=risk_scores,
                 rationale="EF-02 constrains the feasible set and EF-03 reinforces protection of the child.",
                 confidence=0.91,
                 violated_constraints=[],
@@ -147,7 +150,7 @@ class FakeReasoner:
             contributing_frameworks=[],
             weights={},
             weights_reasoning="",
-            risk_scores_per_action=math_result.risk_score_matrix,
+            risk_scores_per_action=risk_scores,
             rationale="",
             confidence=None,
             violated_constraints=[],
@@ -439,6 +442,55 @@ def test_json_request_returns_replay_and_artifacts() -> None:
         "complete",
     ]
     assert "$.parser_result" in payload["replay"][1]["highlight_paths"]
+
+
+def test_single_scenario_no_rag_variant_skips_retrieval_before_reasoning() -> None:
+    retriever = FakeRetriever(available=True)
+    runtime = ShowcaseRuntime(
+        rag_retriever=retriever,
+        reasoning_llm=FakeReasoner(available=True),
+    )
+    run_store = ScenarioRunStore(Path(mkdtemp()) / "scenario_runs.sqlite3")
+    client = TestClient(create_app(runtime=runtime, run_store=run_store))
+
+    response = client.post(
+        "/api/v1/scenario/run",
+        json={
+            "input": build_sample_payload(),
+            "input_mode_hint": "json",
+            "variant": "no_rag",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert retriever.calls == 0
+    assert payload["summary"]["variant"] == "no_rag"
+    assert payload["summary"]["rag_runtime_available"] is False
+    assert payload["artifacts"]["rag_retrieval_result"]["runtime_status"] == "not_requested"
+    assert payload["artifacts"]["rag_retrieval_result"]["frameworks"] == []
+
+
+def test_single_scenario_no_math_variants_skip_math_artifact() -> None:
+    client = build_client()
+
+    response = client.post(
+        "/api/v1/scenario/run",
+        json={
+            "input": build_sample_payload(),
+            "input_mode_hint": "json",
+            "variant": "no_rag_no_math",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["variant"] == "no_rag_no_math"
+    assert payload["summary"]["math_runtime_available"] is False
+    assert payload["summary"]["deterministic_best_action"] is None
+    assert payload["artifacts"]["mathematical_layer_result"]["runtime_status"] == "not_requested"
+    assert payload["artifacts"]["mathematical_layer_result"]["risk_score_matrix"] is None
+    assert payload["artifacts"]["reasoning_result"]["risk_scores_per_action"] == {}
 
 
 def test_natural_language_request_returns_parser_derived_json() -> None:

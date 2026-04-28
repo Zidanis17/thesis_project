@@ -75,6 +75,15 @@ class EthicalReasoningLLM:
         "cyclist",
         "motorcyclist",
     )
+    PASSENGER_RISK_TOKENS = (
+        "passenger",
+        "occupant",
+        "concrete_barrier",
+        "guardrail",
+        "traffic_light_pole",
+        "fixed_barrier",
+        "barrier",
+    )
 
     def __init__(
         self,
@@ -101,11 +110,11 @@ class EthicalReasoningLLM:
     def reason(
         self,
         parser_result: ParserResult,
-        mathematical_layer_result: MathematicalLayerResult,
+        mathematical_layer_result: MathematicalLayerResult | None,
         rag_retrieval_result: RAGRetrievalResult | None = None,
     ) -> EthicalReasoningResult:
         risk_scores_per_action = self._normalize_risk_scores(
-            mathematical_layer_result.risk_score_matrix
+            mathematical_layer_result.risk_score_matrix if mathematical_layer_result is not None else {}
         )
 
         if self._runtime_error is not None or self.client is None:
@@ -149,14 +158,26 @@ class EthicalReasoningLLM:
     def _build_user_prompt(
         self,
         parser_result: ParserResult,
-        mathematical_layer_result: MathematicalLayerResult,
+        mathematical_layer_result: MathematicalLayerResult | None,
         rag_retrieval_result: RAGRetrievalResult | None,
     ) -> str:
         scenario = parser_result.scenario
+        math_payload: dict[str, Any]
+        if mathematical_layer_result is None:
+            math_payload = {
+                "runtime_status": "not_requested",
+                "reason": "Mathematical layer disabled for evaluation variant.",
+                "risk_score_matrix": None,
+                "violated_rules": [],
+                "action_assessments": [],
+                "best_action_by_total_risk": None,
+            }
+        else:
+            math_payload = mathematical_layer_result.to_dict()
         
         prompt_payload = {
             "scenario": scenario.to_dict(),
-            "mathematical_layer": mathematical_layer_result.to_dict(),
+            "mathematical_layer": math_payload,
             "rag_context": self._rag_context_payload(rag_retrieval_result, scenario),
             "required_output_schema": {
                 "dominant_framework": "EF-01 | EF-02 | EF-03 | EF-05 | EF-06",
@@ -167,7 +188,10 @@ class EthicalReasoningLLM:
                     "maximin": "number",
                 },
                 "weights_reasoning": "string - why these weights suit this scenario",
-                "risk_scores_per_action": "copy mathematical_layer.risk_score_matrix exactly",
+                "risk_scores_per_action": (
+                    "copy mathematical_layer.risk_score_matrix exactly; "
+                    "use {} when mathematical_layer.runtime_status is not_requested"
+                ),
                 "rationale": "string - cite retrieved framework_ids and their fields",
                 "confidence": "number between 0 and 1",
                 "violated_constraints": "list of input-supported constraint flags that shaped the reasoning, or []",
@@ -175,9 +199,10 @@ class EthicalReasoningLLM:
         }
         return (
             "Produce the final ethical analysis as a JSON object.\n"
-            "Copy risk_scores_per_action from mathematical_layer.risk_score_matrix exactly.\n"
+            "Copy risk_scores_per_action from mathematical_layer.risk_score_matrix exactly; "
+            "if the mathematical layer is not_requested, return an empty object for risk_scores_per_action.\n"
             "Do not include a recommended_action field.\n"
-            "Cite retrieved EKB framework_ids in your rationale.\n\n"
+            "Cite retrieved EKB framework_ids in your rationale when RAG context is available.\n\n"
             f"{json.dumps(prompt_payload, separators=(',', ':'))}"
         )
 
@@ -261,7 +286,7 @@ class EthicalReasoningLLM:
         payload: dict[str, Any],
         risk_scores_per_action: dict[str, dict[str, float]],
         parser_result: ParserResult,
-        mathematical_layer_result: MathematicalLayerResult,
+        mathematical_layer_result: MathematicalLayerResult | None,
     ) -> EthicalReasoningResult:
         contributing_frameworks = self._framework_list(
             payload.get("contributing_frameworks", [])
@@ -361,7 +386,7 @@ class EthicalReasoningLLM:
         *,
         contributing_frameworks: list[str],
         parser_result: ParserResult,
-        mathematical_layer_result: MathematicalLayerResult,
+        mathematical_layer_result: MathematicalLayerResult | None,
     ) -> str:
         candidate = self._canonical_framework(value, field_name="dominant_framework")
         if self._is_allowed_dominant_framework(
@@ -400,13 +425,13 @@ class EthicalReasoningLLM:
         framework: str,
         *,
         parser_result: ParserResult,
-        mathematical_layer_result: MathematicalLayerResult,
+        mathematical_layer_result: MathematicalLayerResult | None,
     ) -> bool:
         if framework not in self.DOMINANT_FRAMEWORKS:
             return False
 
         scenario = parser_result.scenario
-        global_metrics = mathematical_layer_result.global_metrics
+        global_metrics = mathematical_layer_result.global_metrics if mathematical_layer_result is not None else {}
 
         if self._requires_virtue_fallback(parser_result):
             return framework == "EF-06"
@@ -432,10 +457,10 @@ class EthicalReasoningLLM:
         self,
         *,
         parser_result: ParserResult,
-        mathematical_layer_result: MathematicalLayerResult,
+        mathematical_layer_result: MathematicalLayerResult | None,
     ) -> str:
         scenario = parser_result.scenario
-        global_metrics = mathematical_layer_result.global_metrics
+        global_metrics = mathematical_layer_result.global_metrics if mathematical_layer_result is not None else {}
 
         if self._requires_virtue_fallback(parser_result):
             return "EF-06"
@@ -474,11 +499,24 @@ class EthicalReasoningLLM:
         self,
         *,
         parser_result: ParserResult,
-        mathematical_layer_result: MathematicalLayerResult,
+        mathematical_layer_result: MathematicalLayerResult | None,
     ) -> bool:
+        if mathematical_layer_result is None:
+            return self._scenario_shows_passenger_vru_tradeoff(parser_result.scenario)
         return self._risk_matrix_shows_passenger_vru_tradeoff(
             parser_result=parser_result,
             mathematical_layer_result=mathematical_layer_result,
+        )
+
+    def _scenario_shows_passenger_vru_tradeoff(self, scenario: Scenario) -> bool:
+        if not scenario.collision_unavoidable:
+            return False
+        if not self._vru_stakeholder_ids(scenario):
+            return False
+        return any(
+            any(token in obstacle.type.lower() for token in self.PASSENGER_RISK_TOKENS)
+            or any(token in obstacle.trajectory.lower() for token in self.PASSENGER_RISK_TOKENS)
+            for obstacle in scenario.obstacles
         )
 
     def _risk_matrix_shows_passenger_vru_tradeoff(

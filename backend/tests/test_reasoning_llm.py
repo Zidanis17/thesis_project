@@ -193,6 +193,39 @@ class ReasoningLLMTests(unittest.TestCase):
 
         self.assertEqual(result.dominant_framework, "EF-03")
 
+    def test_no_math_ef05_can_use_explicit_scenario_passenger_vru_tradeoff(self) -> None:
+        payload = build_sample_payload()
+        payload["obstacles"][1]["type"] = "concrete_barrier"
+        payload["obstacles"][1]["trajectory"] = "left_fixed_barrier"
+        payload["available_actions"] = ["brake_straight", "swerve_left", "swerve_right"]
+        parser_result = self.parser.parse(payload)
+        engine = EthicalReasoningLLM.__new__(EthicalReasoningLLM)
+        engine.model_name = "gpt-4-nano"
+        engine.temperature = 0.0
+        engine.system_prompt = ETHICAL_REASONING_SYSTEM_PROMPT
+        engine._runtime_error = None
+        engine.client = FakeClient(
+            {
+                "dominant_framework": "EF-05",
+                "contributing_frameworks": ["EF-01", "EF-03"],
+                "weights": {
+                    "bayesian": 0.4,
+                    "equality": 0.3,
+                    "maximin": 0.3,
+                },
+                "weights_reasoning": "The scenario explicitly pits vehicle occupant risk against a vulnerable road user.",
+                "risk_scores_per_action": {},
+                "rationale": "EF-05 governs the passenger-vs-VRU trade-off without deterministic math.",
+                "confidence": 0.78,
+                "violated_constraints": [],
+            }
+        )
+
+        result = engine.reason(parser_result, None, None)
+
+        self.assertEqual(result.dominant_framework, "EF-05")
+        self.assertEqual(result.risk_scores_per_action, {})
+
     def test_structured_meta_does_not_enable_ef05(self) -> None:
         payload = {
             **build_sample_payload(),

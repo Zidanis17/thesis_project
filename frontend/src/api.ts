@@ -1,4 +1,5 @@
 import type {
+  EvaluationVariant,
   EvaluationRunHistoryResponse,
   EvaluationRunResponse,
   HealthResponse,
@@ -36,6 +37,7 @@ export async function fetchScenarioCatalog(): Promise<ScenarioCatalogResponse> {
 export async function runScenario(
   input: string | Record<string, unknown>,
   inputModeHint: InputEditorMode,
+  variant: EvaluationVariant = 'full_system',
 ): Promise<RunEnvelope> {
   const response = await fetch(`${API_BASE}/api/v1/scenario/run`, {
     method: 'POST',
@@ -45,6 +47,7 @@ export async function runScenario(
     body: JSON.stringify({
       input,
       input_mode_hint: inputModeHint,
+      variant,
     }),
   })
 
@@ -81,7 +84,10 @@ export async function fetchScenarioRunById(runId: string): Promise<RunEnvelope> 
   return { kind: 'success', payload: payload as RunSuccessResponse }
 }
 
-export async function runSubdivision(subdivisionId: string): Promise<SubdivisionRunResponse> {
+export async function runSubdivision(
+  subdivisionId: string,
+  variant: EvaluationVariant = 'full_system',
+): Promise<SubdivisionRunResponse> {
   const response = await fetch(`${API_BASE}/api/v1/scenario/subdivision/run`, {
     method: 'POST',
     headers: {
@@ -89,6 +95,7 @@ export async function runSubdivision(subdivisionId: string): Promise<Subdivision
     },
     body: JSON.stringify({
       subdivision_id: subdivisionId,
+      variant,
     }),
   })
 
@@ -100,7 +107,9 @@ export async function runSubdivision(subdivisionId: string): Promise<Subdivision
   return readJson<SubdivisionRunResponse>(response)
 }
 
-export async function runScenarioBank(variant: 'full_system' | 'no_rag' = 'full_system'): Promise<EvaluationRunResponse> {
+export async function runScenarioBank(
+  variant: EvaluationVariant = 'full_system',
+): Promise<EvaluationRunResponse> {
   const response = await fetch(`${API_BASE}/api/v1/scenario/bank/run`, {
     method: 'POST',
     headers: {

@@ -129,11 +129,15 @@ def build_summary_payload(
 ) -> dict[str, Any]:
     parser_result = result.parser_result
     math_result = result.mathematical_layer_result
+    violated_rules = list(math_result.violated_rules) if math_result is not None else []
+    deterministic_best_action = (
+        math_result.best_action_by_total_risk if math_result is not None else None
+    )
     return {
         "input_mode": parser_result.input_mode,
         "parser_warnings": list(parser_result.warnings),
-        "violated_rules": list(math_result.violated_rules),
-        "deterministic_best_action": math_result.best_action_by_total_risk,
+        "violated_rules": violated_rules,
+        "deterministic_best_action": deterministic_best_action,
         "dominant_framework": reasoning_payload.get("dominant_framework"),
         "rag_runtime_available": rag_payload.get("runtime_available", False),
         "reasoning_runtime_available": reasoning_payload.get("runtime_available", False),

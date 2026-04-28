@@ -1,6 +1,7 @@
 export type InputEditorMode = 'json' | 'text'
 export type StageStatus = 'success' | 'warning' | 'skipped' | 'error'
 export type RunStatus = 'success' | 'error'
+export type EvaluationVariant = 'full_system' | 'no_rag' | 'no_math' | 'no_rag_no_math'
 export type ArtifactTabKey =
   | 'parser_result'
   | 'mathematical_layer_result'
@@ -89,11 +90,13 @@ export interface RunSuccessResponse {
   run: ScenarioRunRecord
   summary: {
     input_mode: string
+    variant?: EvaluationVariant
     parser_warnings: string[]
     violated_rules: string[]
-    deterministic_best_action: string
+    deterministic_best_action: string | null
     dominant_framework: string | null
     rag_runtime_available: boolean
+    math_runtime_available?: boolean
     reasoning_runtime_available: boolean
     reasoning_runtime_error: string | null
     rag_runtime_error: string | null
@@ -210,7 +213,7 @@ export interface EvaluationRunResponse {
   evaluation_id: string | null
   created_at: string
   scope: 'subdivision' | 'full_bank'
-  variant: 'full_system' | 'no_rag'
+  variant: EvaluationVariant
   subdivision_id: string | null
   subdivision_label: string | null
   subdivision?: ScenarioSubdivision

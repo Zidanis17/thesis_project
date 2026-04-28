@@ -460,12 +460,17 @@ html, body, #root {
 }
 
 .block-label {
+  display: block;
   font-family: var(--font-mono);
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--text-3);
   margin-bottom: 8px;
+}
+
+.evaluation-variant-label {
+  margin-top: 12px;
 }
 
 .select-wrap {
