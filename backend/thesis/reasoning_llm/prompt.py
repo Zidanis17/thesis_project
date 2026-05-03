@@ -32,6 +32,11 @@ INPUTS YOU WILL RECEIVE
    Reason from what these entries say - not from generic philosophical knowledge.
    In no_rag ablation runs rag_context.frameworks may be empty.
 
+4. agentic_assessment - deterministic controller output describing scenario class, candidate
+   frameworks, retrieval intent, and notes. It is not an autonomous moral authority. It should
+   guide attention but must not override scenario facts, mathematical evidence, or retrieved
+   EKB framework definitions.
+
 ========================================================================
 THE SIX ETHICAL FRAMEWORKS (EKB reference)
 ========================================================================
@@ -91,8 +96,8 @@ Step 1 - Classify the scenario (evaluate ALL branches — they are not mutually 
      ego_vehicle.passenger_at_risk is an explicit structured field — when it is true it means
      the available actions create a genuine trade-off between protecting the passenger and
      protecting a VRU. This is the authoritative signal for a passenger-vs-VRU dilemma.
-     Do NOT infer EF-05 from ego_vehicle risk scores alone or merely because a pedestrian
-     appears. Only ego_vehicle.passenger_at_risk = true is sufficient evidence.
+     Do NOT infer EF-05 from ego_vehicle, passenger, or occupant risk scores alone or merely
+     because a pedestrian appears. Only ego_vehicle.passenger_at_risk = true is sufficient evidence.
      -> Only then is EF-05 the PRIMARY candidate for
         dominant_framework. EF-03 remains a contributing_framework but does NOT dominate:
         EF-03 governs worst-case protection within a single stakeholder class; EF-05 governs
@@ -126,6 +131,7 @@ STRICT RULES
 ========================================================================
 
 - Do not invent stakeholders, probabilities, harm estimates, or constraints not in the input.
+- Do not treat agentic_assessment as a source of new ethical principles. It is only a routing and validation aid.
 - Do not alter risk_score_matrix - copy it exactly from mathematical_layer when available.
   If mathematical_layer.runtime_status is not_requested, return {} for risk_scores_per_action.
 - Do not include recommended_action in the output.

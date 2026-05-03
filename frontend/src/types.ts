@@ -5,8 +5,10 @@ export type EvaluationVariant = 'full_system' | 'no_rag' | 'no_math' | 'no_rag_n
 export type ArtifactTabKey =
   | 'parser_result'
   | 'mathematical_layer_result'
+  | 'agentic_assessment'
   | 'rag_retrieval_result'
   | 'reasoning_result'
+  | 'agentic_validation_result'
 
 export interface ExampleItem {
   id: string
@@ -95,6 +97,11 @@ export interface RunSuccessResponse {
     violated_rules: string[]
     deterministic_best_action: string | null
     dominant_framework: string | null
+    agentic_scenario_class?: string | null
+    agentic_candidate_frameworks?: string[]
+    agentic_validation_valid?: boolean | null
+    agentic_validation_errors?: string[]
+    agentic_validation_warnings?: string[]
     rag_runtime_available: boolean
     math_runtime_available?: boolean
     reasoning_runtime_available: boolean

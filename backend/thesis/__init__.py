@@ -1,4 +1,10 @@
 from ._env import load_project_env
+from .agentic_controller import (
+    AgenticAssessment,
+    AgenticEthicalController,
+    AgenticValidationResult,
+    RetrievalIntent,
+)
 from .mathematical_layer import (
     ActionRiskAssessment,
     DeterministicMathematicalLayer,
@@ -31,6 +37,9 @@ load_project_env()
 
 __all__ = [
     "ActionRiskAssessment",
+    "AgenticAssessment",
+    "AgenticEthicalController",
+    "AgenticValidationResult",
     "AlwaysIncludedDocument",
     "DeterministicMathematicalLayer",
     "DeterministicRAGRetriever",
@@ -41,6 +50,7 @@ __all__ = [
     "ETHICAL_REASONING_SYSTEM_PROMPT",
     "ParserResult",
     "RAGRetrievalResult",
+    "RetrievalIntent",
     "RetrievedDocument",
     "Scenario",
     "ScenarioPipeline",

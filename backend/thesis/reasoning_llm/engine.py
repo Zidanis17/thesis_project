@@ -4,13 +4,16 @@ import json
 import os
 import re
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .._env import load_project_env
 from ..mathematical_layer import MathematicalLayerResult
 from ..models import ParserResult, Scenario
 from ..rag import RAGRetrievalResult
 from .prompt import ETHICAL_REASONING_SYSTEM_PROMPT
+
+if TYPE_CHECKING:
+    from ..agentic_controller import AgenticAssessment
 
 __all__ = [
     "EthicalReasoningLLM",
@@ -112,6 +115,7 @@ class EthicalReasoningLLM:
         parser_result: ParserResult,
         mathematical_layer_result: MathematicalLayerResult | None,
         rag_retrieval_result: RAGRetrievalResult | None = None,
+        agentic_assessment: AgenticAssessment | None = None,
     ) -> EthicalReasoningResult:
         risk_scores_per_action = self._normalize_risk_scores(
             mathematical_layer_result.risk_score_matrix if mathematical_layer_result is not None else {}
@@ -131,6 +135,7 @@ class EthicalReasoningLLM:
                 parser_result,
                 mathematical_layer_result,
                 rag_retrieval_result,
+                agentic_assessment,
             )
             print(f"Prompt: {len(user_prompt)} chars, ~{len(user_prompt)//4} tokens")
             response = self.client.invoke(
@@ -160,6 +165,7 @@ class EthicalReasoningLLM:
         parser_result: ParserResult,
         mathematical_layer_result: MathematicalLayerResult | None,
         rag_retrieval_result: RAGRetrievalResult | None,
+        agentic_assessment: AgenticAssessment | None = None,
     ) -> str:
         scenario = parser_result.scenario
         math_payload: dict[str, Any]
@@ -179,6 +185,7 @@ class EthicalReasoningLLM:
             "scenario": scenario.to_dict(),
             "mathematical_layer": math_payload,
             "rag_context": self._rag_context_payload(rag_retrieval_result, scenario),
+            "agentic_assessment": agentic_assessment.to_dict() if agentic_assessment else None,
             "required_output_schema": {
                 "dominant_framework": "EF-01 | EF-02 | EF-03 | EF-05 | EF-06",
                 "contributing_frameworks": ["EF-01", "EF-02", "EF-03", "EF-04"],
@@ -203,6 +210,10 @@ class EthicalReasoningLLM:
             "if the mathematical layer is not_requested, return an empty object for risk_scores_per_action.\n"
             "Do not include a recommended_action field.\n"
             "Cite retrieved EKB framework_ids in your rationale when RAG context is available.\n\n"
+            "The agentic_assessment is a deterministic routing and validation aid. "
+            "Use it to understand scenario class, candidate frameworks, and retrieval intent. "
+            "Do not treat it as an independent moral authority. Final reasoning must still be grounded "
+            "in the scenario, mathematical_layer, and rag_context.\n\n"
             f"{json.dumps(prompt_payload, separators=(',', ':'))}"
         )
 

@@ -4,11 +4,14 @@ import json
 import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .._env import load_project_env
 from ..mathematical_layer import MathematicalLayerResult
 from ..models import Scenario
+
+if TYPE_CHECKING:
+    from ..agentic_controller import RetrievalIntent
 
 __all__ = [
     "AlwaysIncludedDocument",
@@ -155,8 +158,9 @@ class DeterministicRAGRetriever:
         self,
         scenario: Scenario,
         mathematical_layer_result: MathematicalLayerResult | None = None,
+        retrieval_intent: RetrievalIntent | None = None,
     ) -> RAGRetrievalResult:
-        query = self._build_query(scenario, mathematical_layer_result)
+        query = self._build_query(scenario, mathematical_layer_result, retrieval_intent)
 
         # If the vector store is unavailable fall back to loading framework files
         # directly from disk so the LLM always has at least some ethical context.
@@ -231,6 +235,7 @@ class DeterministicRAGRetriever:
         self,
         scenario: Scenario,
         mathematical_layer_result: MathematicalLayerResult | None,
+        retrieval_intent: RetrievalIntent | None = None,
     ) -> str:
         """
         Build a natural-language semantic query rather than a keyword list.
@@ -271,6 +276,16 @@ class DeterministicRAGRetriever:
         # Append heuristic hints so the embedding is biased toward the
         # correct framework dimension without overriding semantic search.
         query += " " + self._heuristic_hint(scenario)
+        if retrieval_intent is not None:
+            query += (
+                " Agentic retrieval intent: "
+                f"scenario class {retrieval_intent.scenario_class}. "
+                "Required framework context: "
+                f"{', '.join(retrieval_intent.required_frameworks)}. "
+                "Retrieval focus: "
+                f"{', '.join(retrieval_intent.retrieval_focus_terms)}. "
+                f"Reason: {retrieval_intent.reason}."
+            )
         return query
 
     def _heuristic_hint(self, scenario: Scenario) -> str:

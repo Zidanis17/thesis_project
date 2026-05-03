@@ -139,6 +139,31 @@ def build_summary_payload(
         "violated_rules": violated_rules,
         "deterministic_best_action": deterministic_best_action,
         "dominant_framework": reasoning_payload.get("dominant_framework"),
+        "agentic_scenario_class": (
+            result.agentic_assessment.retrieval_intent.scenario_class
+            if result.agentic_assessment is not None
+            else None
+        ),
+        "agentic_candidate_frameworks": (
+            list(result.agentic_assessment.candidate_frameworks)
+            if result.agentic_assessment is not None
+            else []
+        ),
+        "agentic_validation_valid": (
+            result.agentic_validation_result.is_valid
+            if result.agentic_validation_result is not None
+            else None
+        ),
+        "agentic_validation_errors": (
+            list(result.agentic_validation_result.errors)
+            if result.agentic_validation_result is not None
+            else []
+        ),
+        "agentic_validation_warnings": (
+            list(result.agentic_validation_result.warnings)
+            if result.agentic_validation_result is not None
+            else []
+        ),
         "rag_runtime_available": rag_payload.get("runtime_available", False),
         "reasoning_runtime_available": reasoning_payload.get("runtime_available", False),
         "reasoning_runtime_error": reasoning_payload.get("runtime_error"),

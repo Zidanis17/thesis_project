@@ -126,7 +126,7 @@ class FakeReasoner:
         self._runtime_error = None if available else RuntimeError("Reasoning disabled in test")
         self.model_name = "fake-ethical-model"
 
-    def reason(self, _parser_result, math_result, _rag_result) -> EthicalReasoningResult:
+    def reason(self, _parser_result, math_result, _rag_result=None, agentic_assessment=None) -> EthicalReasoningResult:
         risk_scores = math_result.risk_score_matrix if math_result is not None else {}
         if self.available:
             return EthicalReasoningResult(
@@ -437,10 +437,14 @@ def test_json_request_returns_replay_and_artifacts() -> None:
         "input",
         "parser",
         "math",
+        "agentic_controller",
         "rag",
         "reasoning",
+        "agentic_validation",
         "complete",
     ]
+    assert "agentic_assessment" in payload["artifacts"]
+    assert "agentic_validation_result" in payload["artifacts"]
     assert "$.parser_result" in payload["replay"][1]["highlight_paths"]
 
 
@@ -564,8 +568,8 @@ def test_rag_unavailable_is_warning_not_failure() -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["replay"][3]["stage_id"] == "rag"
-    assert payload["replay"][3]["status"] == "warning"
+    assert payload["replay"][4]["stage_id"] == "rag"
+    assert payload["replay"][4]["status"] == "warning"
     assert payload["replay"][-1]["status"] == "success"
 
 
@@ -579,8 +583,8 @@ def test_reasoning_unavailable_is_warning_not_failure() -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["replay"][4]["stage_id"] == "reasoning"
-    assert payload["replay"][4]["status"] == "warning"
+    assert payload["replay"][5]["stage_id"] == "reasoning"
+    assert payload["replay"][5]["status"] == "warning"
     assert payload["summary"]["reasoning_runtime_available"] is False
     assert payload["replay"][-1]["status"] == "success"
 

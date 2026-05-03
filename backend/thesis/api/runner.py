@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from time import perf_counter
 from typing import Any, Literal
 
+from ..agentic_controller import AgenticEthicalController
 from ..mathematical_layer import DeterministicMathematicalLayer, MathematicalLayerResult
 from ..pipeline import ScenarioPipelineResult
 from ..rag import DeterministicRAGRetriever
@@ -66,6 +67,7 @@ class ShowcaseRuntime:
     mathematical_layer: DeterministicMathematicalLayer
     rag_retriever: DeterministicRAGRetriever | None
     reasoning_llm: EthicalReasoningLLM | None
+    agentic_controller: AgenticEthicalController
 
     def __init__(
         self,
@@ -74,6 +76,7 @@ class ShowcaseRuntime:
         mathematical_layer: DeterministicMathematicalLayer | None = None,
         rag_retriever: DeterministicRAGRetriever | None = None,
         reasoning_llm: EthicalReasoningLLM | None = None,
+        agentic_controller: AgenticEthicalController | None = None,
     ) -> None:
         self.parser = parser or DeterministicScenarioParser()
         self.mathematical_layer = mathematical_layer or DeterministicMathematicalLayer()
@@ -83,6 +86,7 @@ class ShowcaseRuntime:
             if reasoning_llm is not None
             else EthicalReasoningLLM(model_name="gpt-5.4-mini", temperature=0.0)
         )
+        self.agentic_controller = agentic_controller or AgenticEthicalController()
 
     def health_payload(self) -> dict[str, Any]:
         rag_available = bool(self.rag_retriever and self.rag_retriever.vector_store is not None)
@@ -273,6 +277,52 @@ class ShowcaseRuntime:
         )
         snapshot = math_snapshot
 
+        agentic_started = perf_counter()
+        agentic_assessment = None
+        agentic_payload: dict[str, Any]
+        agentic_status = "skipped"
+        agentic_headline = "Agentic controller skipped."
+        agentic_metrics: dict[str, Any] = {}
+
+        try:
+            agentic_assessment = self.agentic_controller.assess(parser_result, math_result)
+            agentic_payload = agentic_assessment.to_dict()
+            scenario_class = agentic_assessment.retrieval_intent.scenario_class
+            candidate_frameworks = ", ".join(agentic_assessment.candidate_frameworks) or "none"
+            agentic_status = "success"
+            agentic_headline = (
+                f"Classified scenario as {scenario_class} with candidate frameworks: "
+                f"{candidate_frameworks}."
+            )
+            agentic_metrics = {
+                "scenario_class": scenario_class,
+                "candidate_frameworks": list(agentic_assessment.candidate_frameworks),
+                "required_frameworks": list(agentic_assessment.retrieval_intent.required_frameworks),
+            }
+        except Exception as exc:
+            agentic_payload = {
+                "runtime_available": False,
+                "runtime_error": str(exc),
+            }
+            agentic_status = "warning"
+            agentic_headline = str(exc)
+
+        agentic_snapshot = {**snapshot, "agentic_assessment": agentic_payload}
+        replay.append(
+            _stage(
+                stage_id="agentic_controller",
+                label="Agentic Controller",
+                status=agentic_status,
+                started_at=agentic_started,
+                ended_at=perf_counter(),
+                headline=agentic_headline,
+                snapshot=agentic_snapshot,
+                previous_snapshot=snapshot,
+                metrics=agentic_metrics,
+            )
+        )
+        snapshot = agentic_snapshot
+
         rag_started = perf_counter()
         rag_result = None
         rag_payload: dict[str, Any]
@@ -292,7 +342,15 @@ class ShowcaseRuntime:
             }
         elif self.rag_retriever is not None:
             try:
-                rag_result = self.rag_retriever.retrieve(parser_result.scenario, math_result)
+                rag_result = self.rag_retriever.retrieve(
+                    parser_result.scenario,
+                    math_result,
+                    retrieval_intent=(
+                        agentic_assessment.retrieval_intent
+                        if agentic_assessment is not None
+                        else None
+                    ),
+                )
                 rag_payload = summarize_rag_result(rag_result)
                 rag_status = "success" if rag_payload.get("runtime_available") else "warning"
                 rag_headline = (
@@ -350,7 +408,12 @@ class ShowcaseRuntime:
 
         if self.reasoning_llm is not None:
             try:
-                reasoning_result = self.reasoning_llm.reason(parser_result, math_result, rag_result)
+                reasoning_result = self.reasoning_llm.reason(
+                    parser_result,
+                    math_result,
+                    rag_result,
+                    agentic_assessment=agentic_assessment,
+                )
                 reasoning_payload = summarize_reasoning_result(reasoning_result)
                 reasoning_status = "success" if reasoning_payload.get("runtime_available") else "warning"
                 if reasoning_payload.get("runtime_available"):
@@ -401,11 +464,68 @@ class ShowcaseRuntime:
         )
         snapshot = reasoning_snapshot
 
+        validation_started = perf_counter()
+        agentic_validation_result = None
+        validation_payload: dict[str, Any]
+        validation_status = "skipped"
+        validation_headline = "Agentic validation skipped."
+        validation_metrics: dict[str, Any] = {}
+
+        if reasoning_result is not None:
+            try:
+                agentic_validation_result = self.agentic_controller.validate_reasoning_result(
+                    parser_result,
+                    math_result,
+                    reasoning_result,
+                )
+                validation_payload = agentic_validation_result.to_dict()
+                validation_status = "success" if agentic_validation_result.is_valid else "warning"
+                validation_headline = (
+                    "Reasoning output passed agentic validation."
+                    if agentic_validation_result.is_valid
+                    else "Reasoning output has validation warnings/errors."
+                )
+                validation_metrics = {
+                    "is_valid": agentic_validation_result.is_valid,
+                    "errors": len(agentic_validation_result.errors),
+                    "warnings": len(agentic_validation_result.warnings),
+                }
+            except Exception as exc:
+                validation_payload = {
+                    "runtime_available": False,
+                    "runtime_error": str(exc),
+                }
+                validation_status = "warning"
+                validation_headline = str(exc)
+        else:
+            validation_payload = {
+                "runtime_status": "not_requested",
+                "reason": "Reasoning result not available.",
+            }
+
+        validation_snapshot = {**snapshot, "agentic_validation_result": validation_payload}
+        replay.append(
+            _stage(
+                stage_id="agentic_validation",
+                label="Agentic Validation",
+                status=validation_status,
+                started_at=validation_started,
+                ended_at=perf_counter(),
+                headline=validation_headline,
+                snapshot=validation_snapshot,
+                previous_snapshot=snapshot,
+                metrics=validation_metrics,
+            )
+        )
+        snapshot = validation_snapshot
+
         result = ScenarioPipelineResult(
             parser_result=parser_result,
             mathematical_layer_result=math_result,
+            agentic_assessment=agentic_assessment,
             rag_retrieval_result=rag_result,
             reasoning_result=reasoning_result,
+            agentic_validation_result=agentic_validation_result,
         )
         summary_payload = build_summary_payload(
             result,
@@ -414,11 +534,38 @@ class ShowcaseRuntime:
         )
         summary_payload["variant"] = variant
         summary_payload["math_runtime_available"] = math_result is not None
+        summary_payload["agentic_scenario_class"] = (
+            agentic_assessment.retrieval_intent.scenario_class
+            if agentic_assessment is not None
+            else None
+        )
+        summary_payload["agentic_candidate_frameworks"] = (
+            list(agentic_assessment.candidate_frameworks)
+            if agentic_assessment is not None
+            else []
+        )
+        summary_payload["agentic_validation_valid"] = (
+            agentic_validation_result.is_valid
+            if agentic_validation_result is not None
+            else None
+        )
+        summary_payload["agentic_validation_errors"] = (
+            list(agentic_validation_result.errors)
+            if agentic_validation_result is not None
+            else []
+        )
+        summary_payload["agentic_validation_warnings"] = (
+            list(agentic_validation_result.warnings)
+            if agentic_validation_result is not None
+            else []
+        )
         artifacts = {
             "parser_result": parser_payload,
             "mathematical_layer_result": math_payload,
+            "agentic_assessment": agentic_payload,
             "rag_retrieval_result": rag_payload,
             "reasoning_result": reasoning_payload,
+            "agentic_validation_result": validation_payload,
         }
 
         completed_snapshot = {**snapshot, "summary": summary_payload}

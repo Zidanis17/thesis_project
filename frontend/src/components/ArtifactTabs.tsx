@@ -4,8 +4,10 @@ import { JsonTree } from './JsonTree'
 const ARTIFACT_LABELS: Record<ArtifactTabKey, string> = {
   parser_result: 'Parser',
   mathematical_layer_result: 'Math',
+  agentic_assessment: 'Agentic',
   rag_retrieval_result: 'RAG',
   reasoning_result: 'Reasoning',
+  agentic_validation_result: 'Validation',
 }
 
 interface ArtifactTabsProps {

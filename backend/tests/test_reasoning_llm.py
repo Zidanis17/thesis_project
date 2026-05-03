@@ -83,7 +83,7 @@ class FakeClient:
 
 
 class FakeReasoningEngine:
-    def reason(self, *_: object) -> EthicalReasoningResult:
+    def reason(self, *_: object, **__: object) -> EthicalReasoningResult:
         return EthicalReasoningResult(
             model_name="fake-model",
             system_prompt=ETHICAL_REASONING_SYSTEM_PROMPT,
