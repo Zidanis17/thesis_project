@@ -46,6 +46,7 @@ class EgoVehicle:
     lane_position: str
     braking_distance_m: float
     mass_kg: float
+    passenger_at_risk: bool = False
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "EgoVehicle":
@@ -56,6 +57,7 @@ class EgoVehicle:
             lane_position=_ensure_string("ego_vehicle.lane_position", data.get("lane_position")),
             braking_distance_m=_ensure_number("ego_vehicle.braking_distance_m", data.get("braking_distance_m")),
             mass_kg=_ensure_number("ego_vehicle.mass_kg", data.get("mass_kg")),
+            passenger_at_risk=_ensure_bool("ego_vehicle.passenger_at_risk", data.get("passenger_at_risk", False)),
         )
 
 

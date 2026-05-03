@@ -294,6 +294,10 @@ class DeterministicRAGRetriever:
 
         if scenario.collision_unavoidable and vru_present:
             hints.append("ethics of risk weighted distribution equity fairness")
+            hints.append(
+                "ethical valence theory passenger pedestrian social valence hierarchy "
+                "EVT passenger vs VRU occupant dilemma moral profile altruistic"
+            )
 
         road_type = self._canonical_road_type(scenario.environment.road_type)
         if road_type in {"highway", "motorway"}:
@@ -451,6 +455,10 @@ class DeterministicRAGRetriever:
             if scenario.collision_unavoidable and not vru_present and "utilitarian" in name:
                 return 0
             if scenario.collision_unavoidable and vru_present and "ethics of risk" in name:
+                return 0
+            if scenario.collision_unavoidable and vru_present and (
+                "valence" in name or "evt" in name
+            ):
                 return 0
             return 1
 

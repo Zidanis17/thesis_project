@@ -234,6 +234,10 @@ class DeterministicScenarioParser:
             mass = self.DEFAULT_EGO_MASS_KG
             warnings.append(f"ego_vehicle.mass_kg defaulted to {self.DEFAULT_EGO_MASS_KG}")
 
+        passenger_at_risk = self._coerce_bool(data.get("passenger_at_risk"))
+        if passenger_at_risk is None:
+            passenger_at_risk = False
+
         return {
             "speed_kmh": round(speed, 3),
             "acceleration_ms2": round(acceleration, 3),
@@ -241,6 +245,7 @@ class DeterministicScenarioParser:
             "lane_position": lane_position,
             "braking_distance_m": round(braking_distance, 3),
             "mass_kg": round(mass, 3),
+            "passenger_at_risk": passenger_at_risk,
         }
 
     def _normalize_environment(self, raw: Any, warnings: list[str]) -> dict[str, Any]:

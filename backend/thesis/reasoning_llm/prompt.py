@@ -86,21 +86,19 @@ Step 1 - Classify the scenario (evaluate ALL branches — they are not mutually 
         EF-02 remains a universal constraint layer but must NOT be dominant here.
   d. Are vulnerable road users present (child, elderly, cyclist, pedestrian)?
      -> EF-03 is a mandatory contributor. Consult its decision_logic regardless of avoidability.
-  e. Is there explicit scenario-derived evidence of a passenger-vs-VRU dilemma, AND is
-     collision_unavoidable TRUE?
-     In full-system or no_rag runs, evidence must come from structured scenario facts and
-     risk_score_matrix containing ego_vehicle, passenger, or occupant risk, plus a real
-     cross-action passenger/occupant-vs-VRU trade-off.
-     In no_math ablation runs, EF-05 may not dominate unless the structured scenario itself
-     explicitly contains passenger/occupant stakeholders and a passenger/occupant-vs-VRU
-     conflict; do not fabricate a trade-off without a risk matrix.
+  e. Is ego_vehicle.passenger_at_risk TRUE, AND is collision_unavoidable TRUE,
+     AND is at least one VRU present?
+     ego_vehicle.passenger_at_risk is an explicit structured field — when it is true it means
+     the available actions create a genuine trade-off between protecting the passenger and
+     protecting a VRU. This is the authoritative signal for a passenger-vs-VRU dilemma.
+     Do NOT infer EF-05 from ego_vehicle risk scores alone or merely because a pedestrian
+     appears. Only ego_vehicle.passenger_at_risk = true is sufficient evidence.
      -> Only then is EF-05 the PRIMARY candidate for
         dominant_framework. EF-03 remains a contributing_framework but does NOT dominate:
         EF-03 governs worst-case protection within a single stakeholder class; EF-05 governs
         the cross-category trade-off between passenger and VRU. When both are present and
         collision is unavoidable, the social valence axis (EF-05) shapes the decision, not
-        the intra-class protection axis (EF-03). Do NOT infer EF-05 merely because the ego
-        vehicle is at risk, or merely because a pedestrian appears in an unavoidable collision.
+        the intra-class protection axis (EF-03).
 
 Step 2 - For each retrieved EKB framework, consult:
   - use_when / avoid_when: is this framework applicable to this scenario?
