@@ -614,6 +614,13 @@ class DeterministicMathematicalLayer:
                 missing.append(field_name)
         return missing
 
+    def _analyzable_obstacles(self, scenario: Scenario) -> list[Any]:
+        return [
+            obstacle
+            for obstacle in scenario.obstacles
+            if not self._obstacle_missing_analysis_fields(obstacle)
+        ]
+
     def _skipped_obstacle_reasons(self, scenario: Scenario) -> list[dict[str, Any]]:
         skipped: list[dict[str, Any]] = []
         for index, obstacle in enumerate(scenario.obstacles):
@@ -643,9 +650,7 @@ class DeterministicMathematicalLayer:
         constraint_flags: list[str] = []
         ego_vehicle_risk = 0.0
 
-        for obstacle in scenario.obstacles:
-            if self._obstacle_missing_analysis_fields(obstacle):
-                continue
+        for obstacle in self._analyzable_obstacles(scenario):
             sr, ego_risk = self._analyze_obstacle(
                 scenario=scenario,
                 action=action,
@@ -1259,8 +1264,9 @@ class DeterministicMathematicalLayer:
             else None
         )
 
+        analyzable_obstacles = self._analyzable_obstacles(scenario)
         closest_obstacle_distance_m = min(
-            (obstacle.distance_m for obstacle in scenario.obstacles if obstacle.distance_m is not None),
+            (obstacle.distance_m for obstacle in analyzable_obstacles),
             default=float("inf"),
         )
         braking_margin_m = (

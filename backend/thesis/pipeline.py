@@ -10,7 +10,7 @@ from .agentic_controller import (
 )
 from .mathematical_layer import DeterministicMathematicalLayer, MathematicalLayerResult
 from .models import ParserResult, Scenario
-from .rag import DeterministicRAGRetriever, RAGRetrievalResult, ensure_rag_retriever
+from .rag import DeterministicRAGRetriever, LazyRAGRuntime, RAGRetrievalResult
 from .reasoning_llm import EthicalReasoningLLM, EthicalReasoningResult
 from .scenario_parser import DeterministicScenarioParser
 
@@ -60,10 +60,25 @@ class ScenarioPipeline:
     ) -> None:
         self.parser = parser or DeterministicScenarioParser()
         self.mathematical_layer = mathematical_layer or DeterministicMathematicalLayer()
-        self.rag_retriever = rag_retriever
+        self.rag_runtime = LazyRAGRuntime(rag_retriever, enabled=auto_rag)
         self.reasoning_llm = reasoning_llm
         self.agentic_controller = agentic_controller or AgenticEthicalController()
-        self.auto_rag = auto_rag
+
+    @property
+    def rag_retriever(self) -> DeterministicRAGRetriever | None:
+        return self.rag_runtime.retriever
+
+    @rag_retriever.setter
+    def rag_retriever(self, retriever: DeterministicRAGRetriever | None) -> None:
+        self.rag_runtime.retriever = retriever
+
+    @property
+    def auto_rag(self) -> bool:
+        return self.rag_runtime.enabled
+
+    @auto_rag.setter
+    def auto_rag(self, enabled: bool) -> None:
+        self.rag_runtime.enabled = enabled
 
     def run(self, payload: str | Mapping[str, Any] | Scenario | ParserResult) -> ScenarioPipelineResult:
         if isinstance(payload, ParserResult):
@@ -85,7 +100,7 @@ class ScenarioPipeline:
 
         rag_retrieval_result = None
         try:
-            retriever = ensure_rag_retriever(self.rag_retriever, enabled=self.auto_rag)
+            retriever = self.rag_runtime.ensure()
         except RuntimeError:
             retriever = None
         if retriever is not None:

@@ -149,6 +149,24 @@ class MathematicalLayerTests(unittest.TestCase):
         self.assertIn("obstacles[0].mass_kg", skipped)
         self.assertEqual(result.risk_score_matrix, {})
 
+    def test_global_distance_metrics_ignore_skipped_obstacles(self) -> None:
+        payload = build_sample_payload()
+        payload["obstacles"][0]["distance_m"] = 5.0
+        del payload["obstacles"][0]["trajectory"]
+        del payload["obstacles"][0]["vulnerability_class"]
+        del payload["obstacles"][0]["mass_kg"]
+        payload["obstacles"][1]["distance_m"] = 50.0
+        payload["sensor_confidence"]["occluded_zones"] = []
+        scenario = self.parser.parse(payload).scenario
+
+        result = self.math_layer.analyze(scenario)
+
+        self.assertEqual(result.global_metrics["runtime_status"], "partial_success")
+        self.assertEqual(result.global_metrics["closest_obstacle_distance_m"], 50.0)
+        self.assertEqual(result.global_metrics["braking_margin_m"], 7.5)
+        self.assertNotIn("obj_01", result.risk_score_matrix["brake_straight"])
+        self.assertIn("obj_02", result.risk_score_matrix["brake_straight"])
+
     def test_missing_optional_context_still_allows_partial_risk_analysis(self) -> None:
         payload = build_sample_payload()
         payload["environment"].pop("speed_limit_kmh")

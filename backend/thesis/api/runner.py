@@ -10,7 +10,7 @@ from typing import Any, Literal
 from ..agentic_controller import AgenticEthicalController
 from ..mathematical_layer import DeterministicMathematicalLayer, MathematicalLayerResult
 from ..pipeline import ScenarioPipelineResult
-from ..rag import DeterministicRAGRetriever, ensure_rag_retriever
+from ..rag import DeterministicRAGRetriever, LazyRAGRuntime
 from ..reasoning_llm import EthicalReasoningLLM, EthicalReasoningResult
 from ..scenario_parser import DeterministicScenarioParser, ScenarioParseError
 from .serializers import (
@@ -65,10 +65,9 @@ class ScenarioDomainError(ValueError):
 class ShowcaseRuntime:
     parser: DeterministicScenarioParser
     mathematical_layer: DeterministicMathematicalLayer
-    rag_retriever: DeterministicRAGRetriever | None
+    rag_runtime: LazyRAGRuntime
     reasoning_llm: EthicalReasoningLLM | None
     agentic_controller: AgenticEthicalController
-    auto_rag: bool
 
     def __init__(
         self,
@@ -82,8 +81,7 @@ class ShowcaseRuntime:
     ) -> None:
         self.parser = parser or DeterministicScenarioParser()
         self.mathematical_layer = mathematical_layer or DeterministicMathematicalLayer()
-        self.rag_retriever = rag_retriever
-        self.auto_rag = auto_rag
+        self.rag_runtime = LazyRAGRuntime(rag_retriever, enabled=auto_rag)
         self.reasoning_llm = (
             reasoning_llm
             if reasoning_llm is not None
@@ -91,15 +89,33 @@ class ShowcaseRuntime:
         )
         self.agentic_controller = agentic_controller or AgenticEthicalController()
 
+    @property
+    def rag_retriever(self) -> DeterministicRAGRetriever | None:
+        return self.rag_runtime.retriever
+
+    @rag_retriever.setter
+    def rag_retriever(self, retriever: DeterministicRAGRetriever | None) -> None:
+        self.rag_runtime.retriever = retriever
+
+    @property
+    def auto_rag(self) -> bool:
+        return self.rag_runtime.enabled
+
+    @auto_rag.setter
+    def auto_rag(self, enabled: bool) -> None:
+        self.rag_runtime.enabled = enabled
+
     def health_payload(self) -> dict[str, Any]:
-        rag_available = bool(self.rag_retriever and self.rag_retriever.vector_store is not None)
+        rag_available = self.rag_runtime.runtime_available
+        rag_runtime_error = self.rag_runtime.runtime_error
+        knowledge_base_path = self.rag_runtime.knowledge_base_path
         reasoning_available = bool(self.reasoning_llm and self.reasoning_llm.client is not None)
         parser_agent = getattr(self.parser, "llm_agent", None)
         parser_agent_available = bool(parser_agent and getattr(parser_agent, "runtime_available", False))
 
         warnings: list[str] = []
-        if self.rag_retriever and self.rag_retriever._runtime_error is not None:
-            warnings.append(str(self.rag_retriever._runtime_error))
+        if rag_runtime_error is not None:
+            warnings.append(str(rag_runtime_error))
         if self.reasoning_llm and self.reasoning_llm._runtime_error is not None:
             warnings.append(str(self.reasoning_llm._runtime_error))
         if parser_agent and getattr(parser_agent, "_runtime_error", None) is not None:
@@ -108,18 +124,12 @@ class ShowcaseRuntime:
         return {
             "status": "ok",
             "knowledge_base_path": (
-                str(self.rag_retriever.knowledge_base_path) if self.rag_retriever is not None else None
+                str(knowledge_base_path) if knowledge_base_path is not None else None
             ),
             "rag": {
                 "runtime_available": rag_available,
-                "runtime_error": str(self.rag_retriever._runtime_error)
-                if self.rag_retriever and self.rag_retriever._runtime_error is not None
-                else None,
-                "runtime_status": (
-                    "lazy_not_initialized"
-                    if self.auto_rag and self.rag_retriever is None
-                    else ("available" if rag_available else "unavailable")
-                ),
+                "runtime_error": str(rag_runtime_error) if rag_runtime_error is not None else None,
+                "runtime_status": self.rag_runtime.runtime_status,
             },
             "reasoning": {
                 "runtime_available": reasoning_available,
@@ -140,8 +150,7 @@ class ShowcaseRuntime:
         }
 
     def _ensure_rag_retriever(self) -> DeterministicRAGRetriever | None:
-        self.rag_retriever = ensure_rag_retriever(self.rag_retriever, enabled=self.auto_rag)
-        return self.rag_retriever
+        return self.rag_runtime.ensure()
 
     def run(
         self,
