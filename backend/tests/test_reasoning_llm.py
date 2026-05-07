@@ -279,7 +279,7 @@ class ReasoningLLMTests(unittest.TestCase):
         self.assertNotIn('"ego:passenger" plus', ETHICAL_REASONING_SYSTEM_PROMPT)
 
     def test_pipeline_includes_reasoning_result_when_engine_is_supplied(self) -> None:
-        pipeline = ScenarioPipeline(reasoning_llm=FakeReasoningEngine())
+        pipeline = ScenarioPipeline(reasoning_llm=FakeReasoningEngine(), auto_rag=False)
 
         result = pipeline.run(self.payload)
 

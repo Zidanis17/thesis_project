@@ -3,6 +3,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from ..models import ParserResult, Scenario
+from ..normalization import (
+    VRU_TYPES as SHARED_VRU_TYPES,
+    VRU_VULNERABILITY_CLASSES as SHARED_VRU_VULNERABILITY_CLASSES,
+)
 from .models import AgenticAssessment, AgenticValidationResult, RetrievalIntent
 
 if TYPE_CHECKING:
@@ -19,18 +23,8 @@ class AgenticEthicalController:
     """
 
     ALLOWED_DOMINANT_FRAMEWORKS = {"EF-01", "EF-02", "EF-03", "EF-05", "EF-06"}
-    VRU_TYPES = {
-        "pedestrian",
-        "pedestrian_adult",
-        "adult_pedestrian",
-        "child_pedestrian",
-        "elderly_pedestrian",
-        "cyclist",
-        "motorcyclist",
-        "hidden_pedestrian",
-        "hidden_cyclist",
-    }
-    VRU_VULNERABILITY_CLASSES = {"high", "child", "elderly", "cyclist", "pedestrian"}
+    VRU_TYPES = SHARED_VRU_TYPES
+    VRU_VULNERABILITY_CLASSES = SHARED_VRU_VULNERABILITY_CLASSES
     PASSENGER_RISK_KEYS = ("ego:passenger", "passenger", "occupant")
 
     def assess(
@@ -128,7 +122,7 @@ class AgenticEthicalController:
                 "dominant_framework must be one of EF-01, EF-02, EF-03, EF-05, or EF-06."
             )
 
-        if scenario.collision_unavoidable and dominant_framework == "EF-02":
+        if scenario.collision_unavoidable is True and dominant_framework == "EF-02":
             errors.append("EF-02 must not dominate when collision_unavoidable is true.")
 
         if not self._scene_interpretable_for_scenario(scenario, mathematical_layer_result):
@@ -206,13 +200,16 @@ class AgenticEthicalController:
         if tradeoff_possible:
             return "passenger_vru_tradeoff_case", ["EF-05", "EF-03", "EF-01"]
 
-        if not scenario.collision_unavoidable:
+        if scenario.collision_unavoidable is None:
+            return "epistemic_uncertainty_case", ["EF-06", "EF-02"]
+
+        if scenario.collision_unavoidable is False:
             return "avoidable_rule_based_case", ["EF-02"]
 
-        if scenario.collision_unavoidable and vru_present:
+        if scenario.collision_unavoidable is True and vru_present:
             return "unavoidable_vru_dilemma", ["EF-03", "EF-01"]
 
-        if scenario.collision_unavoidable and not vru_present:
+        if scenario.collision_unavoidable is True and not vru_present:
             return "unavoidable_aggregate_risk_case", ["EF-01"]
 
         return "epistemic_uncertainty_case", ["EF-06"]
@@ -291,6 +288,14 @@ class AgenticEthicalController:
     ) -> bool:
         if mathematical_layer_result is not None:
             return self._scene_interpretable(mathematical_layer_result)
+        confidence_values = (
+            scenario.sensor_confidence.overall_scene_confidence,
+            scenario.sensor_confidence.lidar,
+            scenario.sensor_confidence.camera,
+            scenario.sensor_confidence.radar,
+        )
+        if any(value is None for value in confidence_values):
+            return False
         confidence = (
             0.40 * scenario.sensor_confidence.overall_scene_confidence
             + 0.20 * scenario.sensor_confidence.lidar
@@ -304,10 +309,10 @@ class AgenticEthicalController:
         scenario: Scenario,
         mathematical_layer_result: MathematicalLayerResult | None,
     ) -> bool:
-        if not scenario.collision_unavoidable or not self._has_vru(scenario):
+        if scenario.collision_unavoidable is not True or not self._has_vru(scenario):
             return False
 
-        if scenario.ego_vehicle.passenger_at_risk:
+        if scenario.ego_vehicle.passenger_at_risk is True:
             return True
 
         if mathematical_layer_result is None:

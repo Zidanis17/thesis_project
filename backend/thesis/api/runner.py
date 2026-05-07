@@ -10,7 +10,7 @@ from typing import Any, Literal
 from ..agentic_controller import AgenticEthicalController
 from ..mathematical_layer import DeterministicMathematicalLayer, MathematicalLayerResult
 from ..pipeline import ScenarioPipelineResult
-from ..rag import DeterministicRAGRetriever
+from ..rag import DeterministicRAGRetriever, ensure_rag_retriever
 from ..reasoning_llm import EthicalReasoningLLM, EthicalReasoningResult
 from ..scenario_parser import DeterministicScenarioParser, ScenarioParseError
 from .serializers import (
@@ -68,6 +68,7 @@ class ShowcaseRuntime:
     rag_retriever: DeterministicRAGRetriever | None
     reasoning_llm: EthicalReasoningLLM | None
     agentic_controller: AgenticEthicalController
+    auto_rag: bool
 
     def __init__(
         self,
@@ -77,10 +78,12 @@ class ShowcaseRuntime:
         rag_retriever: DeterministicRAGRetriever | None = None,
         reasoning_llm: EthicalReasoningLLM | None = None,
         agentic_controller: AgenticEthicalController | None = None,
+        auto_rag: bool = True,
     ) -> None:
         self.parser = parser or DeterministicScenarioParser()
         self.mathematical_layer = mathematical_layer or DeterministicMathematicalLayer()
-        self.rag_retriever = rag_retriever if rag_retriever is not None else DeterministicRAGRetriever()
+        self.rag_retriever = rag_retriever
+        self.auto_rag = auto_rag
         self.reasoning_llm = (
             reasoning_llm
             if reasoning_llm is not None
@@ -91,12 +94,16 @@ class ShowcaseRuntime:
     def health_payload(self) -> dict[str, Any]:
         rag_available = bool(self.rag_retriever and self.rag_retriever.vector_store is not None)
         reasoning_available = bool(self.reasoning_llm and self.reasoning_llm.client is not None)
+        parser_agent = getattr(self.parser, "llm_agent", None)
+        parser_agent_available = bool(parser_agent and getattr(parser_agent, "runtime_available", False))
 
         warnings: list[str] = []
         if self.rag_retriever and self.rag_retriever._runtime_error is not None:
             warnings.append(str(self.rag_retriever._runtime_error))
         if self.reasoning_llm and self.reasoning_llm._runtime_error is not None:
             warnings.append(str(self.reasoning_llm._runtime_error))
+        if parser_agent and getattr(parser_agent, "_runtime_error", None) is not None:
+            warnings.append(str(parser_agent._runtime_error))
 
         return {
             "status": "ok",
@@ -108,6 +115,11 @@ class ShowcaseRuntime:
                 "runtime_error": str(self.rag_retriever._runtime_error)
                 if self.rag_retriever and self.rag_retriever._runtime_error is not None
                 else None,
+                "runtime_status": (
+                    "lazy_not_initialized"
+                    if self.auto_rag and self.rag_retriever is None
+                    else ("available" if rag_available else "unavailable")
+                ),
             },
             "reasoning": {
                 "runtime_available": reasoning_available,
@@ -116,8 +128,20 @@ class ShowcaseRuntime:
                 else None,
                 "model_name": self.reasoning_llm.model_name if self.reasoning_llm is not None else None,
             },
+            "scenario_parser_agent": {
+                "runtime_available": parser_agent_available,
+                "runtime_error": str(parser_agent._runtime_error)
+                if parser_agent and getattr(parser_agent, "_runtime_error", None) is not None
+                else None,
+                "provider": getattr(parser_agent, "provider", None) if parser_agent is not None else None,
+                "model_name": getattr(parser_agent, "model_name", None) if parser_agent is not None else None,
+            },
             "warnings": warnings,
         }
+
+    def _ensure_rag_retriever(self) -> DeterministicRAGRetriever | None:
+        self.rag_retriever = ensure_rag_retriever(self.rag_retriever, enabled=self.auto_rag)
+        return self.rag_retriever
 
     def run(
         self,
@@ -250,15 +274,24 @@ class ShowcaseRuntime:
         else:
             math_result = self.mathematical_layer.analyze(parser_result.scenario)
             math_payload = math_result.to_dict()
-            math_status = "success"
-            math_headline = (
-                "Computed action risks. Best deterministic action: "
-                f"{math_result.best_action_by_total_risk}."
-            )
+            if math_result.global_metrics.get("runtime_status") == "insufficient_data":
+                math_status = "warning"
+                missing_fields = math_result.global_metrics.get("missing_fields", [])
+                math_headline = (
+                    "Risk analysis skipped because scenario fields are incomplete"
+                    + (f" ({len(missing_fields)} missing)." if isinstance(missing_fields, list) else ".")
+                )
+            else:
+                math_status = "success"
+                math_headline = (
+                    "Computed action risks. Best deterministic action: "
+                    f"{math_result.best_action_by_total_risk}."
+                )
             math_metrics = {
                 "best_action": math_result.best_action_by_total_risk,
                 "actions": len(math_result.action_assessments),
                 "violations": len(math_result.violated_rules),
+                "analysis_complete": math_result.global_metrics.get("analysis_complete", True),
             }
 
         math_snapshot = {**snapshot, "mathematical_layer_result": math_payload}
@@ -329,6 +362,7 @@ class ShowcaseRuntime:
         rag_status = "skipped"
         rag_headline = "RAG stage skipped."
         rag_metrics: dict[str, Any] = {}
+        rag_retriever = None
 
         if disable_rag:
             rag_payload = {
@@ -340,9 +374,12 @@ class ShowcaseRuntime:
                 "frameworks": [],
                 "supporting_documents": [],
             }
-        elif self.rag_retriever is not None:
+        else:
+            rag_retriever = self._ensure_rag_retriever()
+
+        if not disable_rag and rag_retriever is not None:
             try:
-                rag_result = self.rag_retriever.retrieve(
+                rag_result = rag_retriever.retrieve(
                     parser_result.scenario,
                     math_result,
                     retrieval_intent=(
@@ -380,7 +417,7 @@ class ShowcaseRuntime:
                     "supporting_docs": 0,
                     "runtime_available": False,
                 }
-        else:
+        elif not disable_rag:
             rag_payload = {"runtime_status": "not_requested", "reason": "RAG stage not provided."}
 
         rag_snapshot = {**snapshot, "rag_retrieval_result": rag_payload}

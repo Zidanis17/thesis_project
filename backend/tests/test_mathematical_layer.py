@@ -4,6 +4,7 @@ from thesis import (
     DeterministicMathematicalLayer,
     DeterministicScenarioParser,
     DeterministicScenarioPipeline,
+    LLMScenarioParserAgentResult,
     ScenarioPipeline,
 )
 
@@ -67,6 +68,17 @@ def build_sample_payload() -> dict:
     }
 
 
+class FakeParserAgent:
+    def extract(self, _text: str) -> LLMScenarioParserAgentResult:
+        return LLMScenarioParserAgentResult(
+            payload=build_sample_payload(),
+            model_name="fake-parser-model",
+            provider="fake",
+            runtime_available=True,
+            runtime_error=None,
+        )
+
+
 class MathematicalLayerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.parser = DeterministicScenarioParser()
@@ -119,6 +131,38 @@ class MathematicalLayerTests(unittest.TestCase):
         self.assertEqual(result.global_metrics["canonical_weather"], "rain")
         self.assertEqual(result.global_metrics["canonical_road_type"], "urban")
 
+    def test_missing_obstacle_harm_fields_are_not_defaulted(self) -> None:
+        payload = build_sample_payload()
+        del payload["obstacles"][0]["trajectory"]
+        del payload["obstacles"][0]["vulnerability_class"]
+        del payload["obstacles"][0]["mass_kg"]
+        payload["obstacles"] = [payload["obstacles"][0]]
+        payload["sensor_confidence"]["occluded_zones"] = []
+        scenario = self.parser.parse(payload).scenario
+
+        result = self.math_layer.analyze(scenario)
+
+        self.assertEqual(result.global_metrics["runtime_status"], "insufficient_data")
+        skipped = result.global_metrics["skipped_obstacles"][0]["missing_fields"]
+        self.assertIn("obstacles[0].trajectory", skipped)
+        self.assertIn("obstacles[0].vulnerability_class", skipped)
+        self.assertIn("obstacles[0].mass_kg", skipped)
+        self.assertEqual(result.risk_score_matrix, {})
+
+    def test_missing_optional_context_still_allows_partial_risk_analysis(self) -> None:
+        payload = build_sample_payload()
+        payload["environment"].pop("speed_limit_kmh")
+        payload["sensor_confidence"].pop("camera")
+        scenario = self.parser.parse(payload).scenario
+
+        result = self.math_layer.analyze(scenario)
+
+        self.assertEqual(result.global_metrics["runtime_status"], "partial_success")
+        self.assertFalse(result.global_metrics["analysis_complete"])
+        self.assertIn("environment.speed_limit_kmh", result.global_metrics["missing_optional_fields"])
+        self.assertIn("sensor_confidence.camera", result.global_metrics["missing_optional_fields"])
+        self.assertIn("brake_straight", result.risk_score_matrix)
+
     def test_vru_type_overrides_low_vulnerability_class_for_protection_mapping(self) -> None:
         self.assertFalse(self.math_layer._is_protected("low", "adult_pedestrian"))
         self.assertFalse(self.math_layer._is_protected("low", "motorcyclist"))
@@ -135,7 +179,10 @@ class MathematicalLayerTests(unittest.TestCase):
             "The left sidewalk is occluded. Available actions are brake straight, swerve left, "
             "swerve right, and brake and swerve left. Collision is unavoidable."
         )
-        pipeline = ScenarioPipeline()
+        pipeline = ScenarioPipeline(
+            parser=DeterministicScenarioParser(llm_agent=FakeParserAgent()),
+            auto_rag=False,
+        )
 
         result = pipeline.run(text)
 

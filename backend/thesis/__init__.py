@@ -12,7 +12,12 @@ from .mathematical_layer import (
     StakeholderRisk,
 )
 from .models import ParserResult, Scenario
-from .scenario_parser import DeterministicScenarioParser, ScenarioParseError
+from .scenario_parser import (
+    DeterministicScenarioParser,
+    LLMScenarioParserAgent,
+    LLMScenarioParserAgentResult,
+    ScenarioParseError,
+)
 from .pipeline import (
     DeterministicScenarioPipeline,
     PipelineResult,
@@ -26,6 +31,7 @@ from .rag import (
     KnowledgeBaseIngestionResult,
     RAGRetrievalResult,
     RetrievedDocument,
+    ensure_rag_retriever,
 )
 from .reasoning_llm import (
     ETHICAL_REASONING_SYSTEM_PROMPT,
@@ -44,6 +50,8 @@ __all__ = [
     "DeterministicMathematicalLayer",
     "DeterministicRAGRetriever",
     "DeterministicScenarioParser",
+    "LLMScenarioParserAgent",
+    "LLMScenarioParserAgentResult",
     "KnowledgeBaseIngester",
     "KnowledgeBaseIngestionResult",
     "MathematicalLayerResult",
@@ -52,6 +60,7 @@ __all__ = [
     "RAGRetrievalResult",
     "RetrievalIntent",
     "RetrievedDocument",
+    "ensure_rag_retriever",
     "Scenario",
     "ScenarioPipeline",
     "ScenarioPipelineResult",

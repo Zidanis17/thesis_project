@@ -5,7 +5,8 @@ from tempfile import mkdtemp
 
 from fastapi.testclient import TestClient
 
-from thesis import EthicalReasoningResult
+from thesis import EthicalReasoningResult, LLMScenarioParserAgentResult
+from thesis import DeterministicScenarioParser
 from thesis.api import ShowcaseRuntime, create_app
 from thesis.api.runner import (
     _confusion_matrix,
@@ -119,6 +120,17 @@ class FakeRetriever:
         )
 
 
+class FakeParserAgent:
+    def extract(self, _text: str) -> LLMScenarioParserAgentResult:
+        return LLMScenarioParserAgentResult(
+            payload=build_sample_payload(),
+            model_name="fake-parser-model",
+            provider="fake",
+            runtime_available=True,
+            runtime_error=None,
+        )
+
+
 class FakeReasoner:
     def __init__(self, *, available: bool) -> None:
         self.available = available
@@ -160,6 +172,7 @@ class FakeReasoner:
 
 def build_client(*, rag_available: bool = True, reasoning_available: bool = True) -> TestClient:
     runtime = ShowcaseRuntime(
+        parser=DeterministicScenarioParser(llm_agent=FakeParserAgent()),
         rag_retriever=FakeRetriever(available=rag_available),
         reasoning_llm=FakeReasoner(available=reasoning_available),
     )
@@ -451,6 +464,7 @@ def test_json_request_returns_replay_and_artifacts() -> None:
 def test_single_scenario_no_rag_variant_skips_retrieval_before_reasoning() -> None:
     retriever = FakeRetriever(available=True)
     runtime = ShowcaseRuntime(
+        parser=DeterministicScenarioParser(llm_agent=FakeParserAgent()),
         rag_retriever=retriever,
         reasoning_llm=FakeReasoner(available=True),
     )
@@ -539,7 +553,7 @@ def test_metadata_is_stripped_before_replay_and_artifacts() -> None:
     assert "_meta" not in detail_response.json()["input"]
 
 
-def test_parser_validation_error_returns_400_with_partial_replay() -> None:
+def test_partial_json_request_continues_with_incomplete_math_warning() -> None:
     client = build_client()
 
     response = client.post(
@@ -550,12 +564,13 @@ def test_parser_validation_error_returns_400_with_partial_replay() -> None:
         },
     )
 
-    assert response.status_code == 400
+    assert response.status_code == 200
     payload = response.json()
-    assert payload["run"]["status"] == "error"
-    assert payload["error"]["code"] == "scenario_parse_error"
-    assert [stage["stage_id"] for stage in payload["replay"]] == ["input", "parser"]
-    assert payload["replay"][-1]["status"] == "error"
+    assert payload["run"]["status"] == "success"
+    assert payload["artifacts"]["parser_result"]["ego_vehicle"]["speed_kmh"] is None
+    assert payload["artifacts"]["mathematical_layer_result"]["global_metrics"]["runtime_status"] == "insufficient_data"
+    assert payload["replay"][2]["stage_id"] == "math"
+    assert payload["replay"][2]["status"] == "warning"
 
 
 def test_rag_unavailable_is_warning_not_failure() -> None:
@@ -620,7 +635,7 @@ def test_scenario_runs_are_persisted_and_fetchable() -> None:
     assert detail_payload["input"]["ego_vehicle"]["speed_kmh"] == 60
 
 
-def test_failed_runs_are_persisted_in_history() -> None:
+def test_partial_runs_are_persisted_in_history() -> None:
     client = build_client()
 
     run_response = client.post(
@@ -631,7 +646,7 @@ def test_failed_runs_are_persisted_in_history() -> None:
         },
     )
 
-    assert run_response.status_code == 400
+    assert run_response.status_code == 200
     run_payload = run_response.json()
     run_id = run_payload["run"]["id"]
 
@@ -640,14 +655,14 @@ def test_failed_runs_are_persisted_in_history() -> None:
     assert history_response.status_code == 200
     history_payload = history_response.json()
     assert history_payload["total_runs"] == 1
-    assert history_payload["success_runs"] == 0
-    assert history_payload["failed_runs"] == 1
+    assert history_payload["success_runs"] == 1
+    assert history_payload["failed_runs"] == 0
     assert history_payload["runs"][0]["id"] == run_id
-    assert history_payload["runs"][0]["error_code"] == "scenario_parse_error"
+    assert history_payload["runs"][0]["error_code"] is None
 
     detail_response = client.get(f"/api/v1/scenario/runs/{run_id}")
 
     assert detail_response.status_code == 200
     detail_payload = detail_response.json()
-    assert detail_payload["run"]["status"] == "error"
-    assert detail_payload["error"]["code"] == "scenario_parse_error"
+    assert detail_payload["run"]["status"] == "success"
+    assert detail_payload["artifacts"]["mathematical_layer_result"]["global_metrics"]["runtime_status"] == "insufficient_data"

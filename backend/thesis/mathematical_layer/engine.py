@@ -62,6 +62,12 @@ from math import cos, radians, exp
 from typing import Any
 
 from ..models import Scenario
+from ..normalization import (
+    VULNERABILITY_TO_PROTECTED as SHARED_VULNERABILITY_TO_PROTECTED,
+    canonicalize_road_type,
+    canonicalize_trajectory,
+    canonicalize_weather,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -170,8 +176,8 @@ class MathematicalLayerResult:
     violated_rules: list[str]
     action_assessments: list[ActionRiskAssessment]
     risk_score_matrix: dict[str, dict[str, float]]
-    best_action_by_total_risk: str
-    best_action_by_ethical_cost: str  # selected by Bayes cost [Eq. 9, Geisslinger et al. 2023]
+    best_action_by_total_risk: str | None
+    best_action_by_ethical_cost: str | None  # selected by Bayes cost [Eq. 9, Geisslinger et al. 2023]
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -242,37 +248,6 @@ class DeterministicMathematicalLayer:
         "storm": 1.18,
     }
 
-    WEATHER_CANONICAL_MAP = {
-        "light_rain": "rain",
-        "overcast": "clear",
-    }
-
-    ROAD_TYPE_CANONICAL_MAP = {
-        "urban_arterial": "urban",
-        "residential_street": "residential",
-        "urban_intersection": "intersection",
-        "ring_road": "highway",
-        "highway_merge": "highway",
-        "hospital_access_road": "hospital_zone",
-    }
-
-    TRAJECTORY_CANONICAL_MAP = {
-        "same_lane_braking": "same_lane",
-        "same_lane_edge": "same_lane",
-        "same_lane_stationary": "stationary",
-        "lawful_crosswalk": "crossing",
-        "crossing_jaywalking": "crossing",
-        "crossing_from_between_parked_cars": "crossing",
-        "merge_from_ramp": "merging",
-        "partial_lane_obstruction": "stationary",
-        "right_shoulder_stationary": "stationary",
-        "right_edge_barrier": "stationary",
-        "left_edge_barrier": "stationary",
-        "left_fixed_barrier": "stationary",
-        "right_side_fixed": "stationary",
-        "adjacent_left_lane_moving": "same_lane",
-    }
-
     # Protection classification follows Geisslinger et al. (2023):
     # "our model distinguishes between protected (vehicles, trucks) and
     #  unprotected (pedestrians, cyclists) road users" (Methods section).
@@ -284,33 +259,7 @@ class DeterministicMathematicalLayer:
     # strings, the default=True fallback in .get() would silently treat
     # pedestrians and cyclists as protected road users — incorrectly applying
     # the vehicle harm coefficients instead of the pedestrian logistic model.
-    VULNERABILITY_TO_PROTECTED: dict[str, bool] = {
-        # --- Unprotected road users (VRUs) [Geisslinger et al. 2023] ---
-        "high": False,
-        "child": False,
-        "elderly": False,
-        "pedestrian": False,
-        "pedestrian_adult": False,
-        "adult_pedestrian": False,
-        "child_pedestrian": False,
-        "elderly_pedestrian": False,
-        "cyclist": False,
-        "motorcyclist": False,
-        "hidden_pedestrian": False,
-        "hidden_cyclist": False,
-
-        # --- Protected road users (crash structure) [Geisslinger et al. 2023] ---
-        "medium": True,
-        "low": True,
-        "vehicle": True,
-        "vehicle_sedan": True,
-        "vehicle_suv": True,
-        "vehicle_hatchback": True,
-        "delivery_van": True,
-        "parked_vehicle": True,
-        "guardrail": True,
-        "traffic_light_pole": True,
-    }
+    VULNERABILITY_TO_PROTECTED: dict[str, bool] = SHARED_VULNERABILITY_TO_PROTECTED
 
     PRIORITY_TRAJECTORIES = {"crossing", "oncoming", "merging"}
     RIGHT_OF_WAY_LIKELIHOOD_THRESHOLD = 0.45
@@ -534,7 +483,30 @@ class DeterministicMathematicalLayer:
     # ------------------------------------------------------------------
 
     def analyze(self, scenario: Scenario) -> MathematicalLayerResult:
+        missing_fields = self._missing_required_analysis_fields(scenario)
+        if missing_fields:
+            return MathematicalLayerResult(
+                global_metrics={
+                    "runtime_status": "insufficient_data",
+                    "analysis_complete": False,
+                    "missing_fields": missing_fields,
+                    "scene_interpretable": False,
+                    "reason": "Mathematical risk analysis requires concrete action, ego-vehicle, and stakeholder fields.",
+                },
+                violated_rules=[],
+                action_assessments=[],
+                risk_score_matrix={},
+                best_action_by_total_risk=None,
+                best_action_by_ethical_cost=None,
+            )
+
         global_metrics = self._compute_global_metrics(scenario)
+        skipped_obstacles = self._skipped_obstacle_reasons(scenario)
+        optional_missing = self._missing_optional_analysis_fields(scenario)
+        global_metrics["skipped_obstacles"] = skipped_obstacles
+        global_metrics["missing_optional_fields"] = optional_missing
+        global_metrics["runtime_status"] = "partial_success" if optional_missing or skipped_obstacles else "success"
+        global_metrics["analysis_complete"] = not optional_missing and not skipped_obstacles
         violated_rules = self._compute_rule_flags(scenario, global_metrics)
 
         action_assessments: list[ActionRiskAssessment] = []
@@ -546,6 +518,22 @@ class DeterministicMathematicalLayer:
             risk_score_matrix[action] = {"ego_vehicle": round(assessment.ego_vehicle_risk, 3)}
             for sr in assessment.stakeholder_risks:
                 risk_score_matrix[action][sr.stakeholder_id] = round(sr.risk_score, 3)
+
+        if not any(assessment.stakeholder_risks for assessment in action_assessments):
+            return MathematicalLayerResult(
+                global_metrics={
+                    **global_metrics,
+                    "runtime_status": "insufficient_data",
+                    "analysis_complete": False,
+                    "scene_interpretable": False,
+                    "reason": "No complete obstacle or occlusion-zone stakeholder could be analyzed.",
+                },
+                violated_rules=[],
+                action_assessments=[],
+                risk_score_matrix={},
+                best_action_by_total_risk=None,
+                best_action_by_ethical_cost=None,
+            )
 
         # Best action by raw total risk (Bayes principle, Eq. 9)
         best_total = min(
@@ -568,6 +556,78 @@ class DeterministicMathematicalLayer:
             best_action_by_ethical_cost=best_ethical,
         )
 
+    def _missing_required_analysis_fields(self, scenario: Scenario) -> list[str]:
+        missing: list[str] = []
+
+        for path, value in (
+            ("ego_vehicle.speed_kmh", scenario.ego_vehicle.speed_kmh),
+            ("ego_vehicle.braking_distance_m", scenario.ego_vehicle.braking_distance_m),
+            ("ego_vehicle.mass_kg", scenario.ego_vehicle.mass_kg),
+        ):
+            if value is None:
+                missing.append(path)
+
+        if not scenario.available_actions:
+            missing.append("available_actions")
+        else:
+            unsupported_actions = [
+                action for action in scenario.available_actions if action not in self.ACTION_PROFILES
+            ]
+            for action in unsupported_actions:
+                missing.append(f"available_actions unsupported action: {action}")
+        if not scenario.obstacles and not scenario.sensor_confidence.occluded_zones:
+            missing.append("obstacles")
+
+        return missing
+
+    def _missing_optional_analysis_fields(self, scenario: Scenario) -> list[str]:
+        missing: list[str] = []
+        for path, value in (
+            ("environment.speed_limit_kmh", scenario.environment.speed_limit_kmh),
+            ("environment.visibility_m", scenario.environment.visibility_m),
+            ("environment.weather", scenario.environment.weather),
+            ("environment.traffic_density", scenario.environment.traffic_density),
+            ("sensor_confidence.lidar", scenario.sensor_confidence.lidar),
+            ("sensor_confidence.camera", scenario.sensor_confidence.camera),
+            ("sensor_confidence.radar", scenario.sensor_confidence.radar),
+            (
+                "sensor_confidence.overall_scene_confidence",
+                scenario.sensor_confidence.overall_scene_confidence,
+            ),
+        ):
+            if value is None or value == "":
+                missing.append(path)
+        return missing
+
+    def _obstacle_missing_analysis_fields(self, obstacle: Any) -> list[str]:
+        missing: list[str] = []
+        for field_name, value in (
+            ("id", obstacle.id),
+            ("type", obstacle.type),
+            ("distance_m", obstacle.distance_m),
+            ("time_to_impact_s", obstacle.time_to_impact_s),
+            ("trajectory", obstacle.trajectory),
+            ("vulnerability_class", obstacle.vulnerability_class),
+            ("mass_kg", obstacle.mass_kg),
+        ):
+            if value is None or value == "":
+                missing.append(field_name)
+        return missing
+
+    def _skipped_obstacle_reasons(self, scenario: Scenario) -> list[dict[str, Any]]:
+        skipped: list[dict[str, Any]] = []
+        for index, obstacle in enumerate(scenario.obstacles):
+            missing = self._obstacle_missing_analysis_fields(obstacle)
+            if missing:
+                skipped.append(
+                    {
+                        "index": index,
+                        "id": obstacle.id or f"obstacles[{index}]",
+                        "missing_fields": [f"obstacles[{index}].{field}" for field in missing],
+                    }
+                )
+        return skipped
+
     # ------------------------------------------------------------------
     # Action-level analysis
     # ------------------------------------------------------------------
@@ -584,6 +644,8 @@ class DeterministicMathematicalLayer:
         ego_vehicle_risk = 0.0
 
         for obstacle in scenario.obstacles:
+            if self._obstacle_missing_analysis_fields(obstacle):
+                continue
             sr, ego_risk = self._analyze_obstacle(
                 scenario=scenario,
                 action=action,
@@ -609,7 +671,11 @@ class DeterministicMathematicalLayer:
             ego_vehicle_risk += ego_risk
             constraint_flags.extend(sr.constraint_flags)
 
-        if "swerve" in action and scenario.ego_vehicle.speed_kmh > scenario.environment.speed_limit_kmh:
+        if (
+            "swerve" in action
+            and scenario.environment.speed_limit_kmh is not None
+            and scenario.ego_vehicle.speed_kmh > scenario.environment.speed_limit_kmh
+        ):
             constraint_flags.append("speeding_during_lateral_evasion")
 
         stakeholder_total_risk = sum(sr.risk_score for sr in stakeholder_risks)
@@ -1086,35 +1152,43 @@ class DeterministicMathematicalLayer:
         # scores. Here it is derived deterministically from the Scenario's
         # sensor confidence fields rather than from a Kalman covariance matrix,
         # as the latter is not available in this architecture.
-        visibility_pressure = float(global_metrics["visibility_pressure"])
-        scene_uncertainty = float(global_metrics["scene_uncertainty"])
+        visibility_pressure = global_metrics.get("visibility_pressure")
+        scene_uncertainty = global_metrics.get("scene_uncertainty")
 
         # --- GROUP 3: Environmental context modifiers ---
 
         # Minor additive terms for road condition and scene complexity.
         # No specific literature mapping; included for physical plausibility.
-        weather_pressure = self.WEATHER_PRESSURE.get(self._canonical_weather(scenario.environment.weather), 0.15)
-        traffic_pressure = self.TRAFFIC_PRESSURE.get(scenario.environment.traffic_density, 0.45)
+        weather_pressure = (
+            self.WEATHER_PRESSURE.get(self._canonical_weather(scenario.environment.weather), 0.15)
+            if scenario.environment.weather
+            else None
+        )
+        traffic_pressure = (
+            self.TRAFFIC_PRESSURE.get(scenario.environment.traffic_density, 0.45)
+            if scenario.environment.traffic_density
+            else None
+        )
 
         # Unavoidable-collision flag: small additive bonus when the scenario
         # is marked collision_unavoidable, ensuring the model does not
         # underestimate risk in declared unavoidable situations.
         unavoidable_bonus = 0.10 if scenario.collision_unavoidable else 0.0
 
-        # Weighted combination. Weights ensure GROUP 1 (physical imminence)
-        # dominates (0.80 total), GROUP 2 (uncertainty) provides secondary
-        # modulation (0.12 total), and GROUP 3 (environment) acts as a minor
-        # contextual adjustment (0.08 total). See class-level docblock for
-        # full rationale.
-        return _clamp(
-            0.45 * braking_pressure       # dominant: kinematic braking threat
-            + 0.35 * time_pressure        # dominant: time-to-impact imminence
-            + 0.07 * scene_uncertainty    # secondary: epistemic uncertainty
-            + 0.05 * visibility_pressure  # secondary: perceptual degradation
-            + 0.04 * weather_pressure     # minor: road condition
-            + 0.04 * traffic_pressure     # minor: scene complexity
-            + unavoidable_bonus,
-        )
+        terms = [
+            (0.45, braking_pressure),
+            (0.35, time_pressure),
+            (0.07, scene_uncertainty),
+            (0.05, visibility_pressure),
+            (0.04, weather_pressure),
+            (0.04, traffic_pressure),
+        ]
+        available_terms = [(weight, value) for weight, value in terms if value is not None]
+        weighted_sum = sum(weight * float(value) for weight, value in available_terms)
+        weight_total = sum(weight for weight, _value in available_terms)
+        if weight_total <= 0.0:
+            return _clamp(unavoidable_bonus)
+        return _clamp((weighted_sum / weight_total) + unavoidable_bonus)
 
     def _occlusion_likelihood(
         self,
@@ -1137,15 +1211,15 @@ class DeterministicMathematicalLayer:
         hypothetical: their existence is uncertain, so their contribution to
         total risk should remain bounded relative to confirmed obstacles.
         """
-        scene_uncertainty = float(global_metrics["scene_uncertainty"])
-        visibility_pressure = float(global_metrics["visibility_pressure"])
+        scene_uncertainty = global_metrics.get("scene_uncertainty")
+        visibility_pressure = global_metrics.get("visibility_pressure")
         unavoidable_bonus = 0.02 if collision_unavoidable and exposure >= 0.50 else 0.0
-        likelihood = exposure * zone_factor * (
-            0.55 * scene_uncertainty    # epistemic uncertainty dominates for hidden agents
-            + 0.25 * visibility_pressure
-            + 0.05                      # irreducible base exposure even under ideal sensing
-            + unavoidable_bonus
-        )
+        likelihood_terms = [0.05 + unavoidable_bonus]
+        if scene_uncertainty is not None:
+            likelihood_terms.append(0.55 * float(scene_uncertainty))
+        if visibility_pressure is not None:
+            likelihood_terms.append(0.25 * float(visibility_pressure))
+        likelihood = exposure * zone_factor * sum(likelihood_terms)
         return _clamp(likelihood, maximum=0.40)
 
     # ------------------------------------------------------------------
@@ -1153,34 +1227,40 @@ class DeterministicMathematicalLayer:
     # ------------------------------------------------------------------
 
     def _compute_global_metrics(self, scenario: Scenario) -> dict[str, Any]:
-        # Sensor fusion confidence: weighted combination of individual sensor
-        # modalities. The 0.40 weight on overall_scene_confidence reflects its
-        # role as a higher-level fused estimate; LiDAR, camera, and radar each
-        # contribute 0.20 as independent modalities.
-        sensor_fusion_confidence = _clamp(
-            (
-                0.40 * scenario.sensor_confidence.overall_scene_confidence
-                + 0.20 * scenario.sensor_confidence.lidar
-                + 0.20 * scenario.sensor_confidence.camera
-                + 0.20 * scenario.sensor_confidence.radar
-            ),
+        sensor_terms = [
+            (0.40, scenario.sensor_confidence.overall_scene_confidence),
+            (0.20, scenario.sensor_confidence.lidar),
+            (0.20, scenario.sensor_confidence.camera),
+            (0.20, scenario.sensor_confidence.radar),
+        ]
+        available_sensor_terms = [(weight, value) for weight, value in sensor_terms if value is not None]
+        sensor_fusion_confidence = None
+        if available_sensor_terms:
+            weight_total = sum(weight for weight, _value in available_sensor_terms)
+            sensor_fusion_confidence = _clamp(
+                sum(weight * value for weight, value in available_sensor_terms) / weight_total,
+            )
+        scene_uncertainty = (
+            1.0 - sensor_fusion_confidence if sensor_fusion_confidence is not None else None
         )
-        # scene_uncertainty is the complement of confidence and feeds directly
-        # into _base_collision_likelihood() as the epistemic uncertainty term,
-        # motivated by Berthelot et al. (2011).
-        scene_uncertainty = 1.0 - sensor_fusion_confidence
 
-        speed_limit_delta_kmh = scenario.ego_vehicle.speed_kmh - scenario.environment.speed_limit_kmh
+        speed_limit_delta_kmh = (
+            scenario.ego_vehicle.speed_kmh - scenario.environment.speed_limit_kmh
+            if scenario.environment.speed_limit_kmh is not None
+            else None
+        )
 
-        # visibility_pressure: normalised degradation of perception range
-        # relative to a 120 m reference distance. Zero at or above 120 m;
-        # approaches 1.0 as visibility approaches zero.
-        visibility_pressure = _clamp(
-            (self.VISIBILITY_REFERENCE_M - scenario.environment.visibility_m) / self.VISIBILITY_REFERENCE_M,
+        visibility_pressure = (
+            _clamp(
+                (self.VISIBILITY_REFERENCE_M - scenario.environment.visibility_m)
+                / self.VISIBILITY_REFERENCE_M,
+            )
+            if scenario.environment.visibility_m is not None
+            else None
         )
 
         closest_obstacle_distance_m = min(
-            (obstacle.distance_m for obstacle in scenario.obstacles),
+            (obstacle.distance_m for obstacle in scenario.obstacles if obstacle.distance_m is not None),
             default=float("inf"),
         )
         braking_margin_m = (
@@ -1190,10 +1270,17 @@ class DeterministicMathematicalLayer:
         )
 
         return {
-            "sensor_fusion_confidence": round(sensor_fusion_confidence, 3),
-            "scene_uncertainty": round(scene_uncertainty, 3),
-            "speed_limit_delta_kmh": round(speed_limit_delta_kmh, 3),
-            "visibility_pressure": round(visibility_pressure, 3),
+            "sensor_fusion_confidence": (
+                round(sensor_fusion_confidence, 3)
+                if sensor_fusion_confidence is not None else None
+            ),
+            "scene_uncertainty": round(scene_uncertainty, 3) if scene_uncertainty is not None else None,
+            "speed_limit_delta_kmh": (
+                round(speed_limit_delta_kmh, 3) if speed_limit_delta_kmh is not None else None
+            ),
+            "visibility_pressure": (
+                round(visibility_pressure, 3) if visibility_pressure is not None else None
+            ),
             "canonical_weather": self._canonical_weather(scenario.environment.weather),
             "canonical_road_type": self._canonical_road_type(scenario.environment.road_type),
             "closest_obstacle_distance_m": (
@@ -1206,14 +1293,20 @@ class DeterministicMathematicalLayer:
             ),
             # Epistemic uncertainty flag: below 0.85 sensor confidence the
             # scene interpretation is considered unreliable.
-            "scene_interpretable": sensor_fusion_confidence >= 0.85,
+            "scene_interpretable": (
+                sensor_fusion_confidence >= 0.85
+                if sensor_fusion_confidence is not None else False
+            ),
         }
 
     def _compute_rule_flags(self, scenario: Scenario, global_metrics: dict[str, Any]) -> list[str]:
         flags: list[str] = []
-        if global_metrics["speed_limit_delta_kmh"] > 0:
+        if global_metrics["speed_limit_delta_kmh"] is not None and global_metrics["speed_limit_delta_kmh"] > 0:
             flags.append("speed_limit_exceeded")
-        if scenario.ego_vehicle.braking_distance_m > scenario.environment.visibility_m:
+        if (
+            scenario.environment.visibility_m is not None
+            and scenario.ego_vehicle.braking_distance_m > scenario.environment.visibility_m
+        ):
             flags.append("cannot_stop_within_visible_distance")
         return flags
 
@@ -1232,16 +1325,13 @@ class DeterministicMathematicalLayer:
         return self.ACTION_PROFILES.get(action, self.ACTION_PROFILES["brake_straight"])
 
     def _canonical_weather(self, weather: str) -> str:
-        value = weather.strip().lower()
-        return self.WEATHER_CANONICAL_MAP.get(value, value)
+        return canonicalize_weather(weather)
 
     def _canonical_road_type(self, road_type: str) -> str:
-        value = road_type.strip().lower()
-        return self.ROAD_TYPE_CANONICAL_MAP.get(value, value)
+        return canonicalize_road_type(road_type)
 
     def _canonical_trajectory(self, trajectory: str) -> str:
-        value = trajectory.strip().lower()
-        return self.TRAJECTORY_CANONICAL_MAP.get(value, value)
+        return canonicalize_trajectory(trajectory)
 
     def _is_protected(self, vulnerability_class: str, stakeholder_type: str | None = None) -> bool:
         vulnerability_key = vulnerability_class.strip().lower()

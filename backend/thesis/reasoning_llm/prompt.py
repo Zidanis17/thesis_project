@@ -14,8 +14,10 @@ INPUTS YOU WILL RECEIVE
 
 2. mathematical_layer - deterministic risk analysis output when the mathematical layer is enabled.
    In no_math ablation runs this may instead contain runtime_status="not_requested",
-   risk_score_matrix=null, and empty rule/action fields. When mathematical_layer is not_requested,
-   do not infer or invent numeric risks, best actions, RSS violations, or risk-matrix evidence.
+   risk_score_matrix=null, and empty rule/action fields. In partial-input runs it may contain
+   global_metrics.runtime_status="insufficient_data" and an empty risk_score_matrix.
+   When mathematical_layer is not_requested or insufficient_data, do not infer or invent
+   numeric risks, best actions, RSS violations, or risk-matrix evidence.
    When enabled, it includes:
    - global_metrics: computed scene-level signals including sensor_fusion_confidence,
      scene_uncertainty, and scene_interpretable (FALSE when sensor_fusion_confidence < 0.82 —
@@ -116,8 +118,9 @@ Step 3 - Use the mathematical layer:
   - risk_score_matrix: quantitative basis for comparing actions.
   - action_assessments: RSS constraint violations are hard rejections under EF-02.
   - best_action_by_total_risk: the EF-01 answer only. Do not treat as the default winner.
-  - If mathematical_layer.runtime_status is not_requested, skip this step and state only
-    that no deterministic risk matrix was available; do not invent one.
+  - If mathematical_layer.runtime_status is not_requested or
+    mathematical_layer.global_metrics.runtime_status is insufficient_data, skip this step
+    and state only that no deterministic risk matrix was available; do not invent one.
 
 Step 4 - Select dominant_framework using the dominant_when fields from the EKB entries.
   All other frameworks that informed the reasoning go into contributing_frameworks.
@@ -133,7 +136,8 @@ STRICT RULES
 - Do not invent stakeholders, probabilities, harm estimates, or constraints not in the input.
 - Do not treat agentic_assessment as a source of new ethical principles. It is only a routing and validation aid.
 - Do not alter risk_score_matrix - copy it exactly from mathematical_layer when available.
-  If mathematical_layer.runtime_status is not_requested, return {} for risk_scores_per_action.
+  If mathematical_layer.runtime_status is not_requested or mathematical_layer.global_metrics.runtime_status
+  is insufficient_data, return {} for risk_scores_per_action.
 - Do not include recommended_action in the output.
 - If collision_unavoidable is true, dominant_framework must not be EF-02.
 - violated_constraints must list only input-supported constraint flags, or [].
@@ -152,7 +156,7 @@ OUTPUT SCHEMA
     "maximin": 0.3
   },
   "weights_reasoning": "string - why these weights reflect the ethical balance for this scenario",
-  "risk_scores_per_action": "copy mathematical_layer.risk_score_matrix exactly; use {} when mathematical_layer is not_requested",
+  "risk_scores_per_action": "copy mathematical_layer.risk_score_matrix exactly; use {} when mathematical_layer is not_requested or insufficient_data",
   "rationale": "string - cite retrieved framework_ids, reference their decision_logic and tradeoffs, explain which framework shaped the decision and why",
   "confidence": 0.85,
   "violated_constraints": []

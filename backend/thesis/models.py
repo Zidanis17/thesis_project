@@ -8,8 +8,10 @@ class ValidationError(ValueError):
     pass
 
 
-def _ensure_number(name: str, value: Any) -> float:
-    if isinstance(value, bool) or value is None:
+def _ensure_number(name: str, value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
         raise ValidationError(f"{name} must be a number")
     try:
         return float(value)
@@ -18,15 +20,25 @@ def _ensure_number(name: str, value: Any) -> float:
 
 
 def _ensure_string(name: str, value: Any) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise ValidationError(f"{name} must be a non-empty string")
-    return value.strip()
+    if value is None:
+        return ""
+    return str(value).strip()
 
 
-def _ensure_bool(name: str, value: Any) -> bool:
-    if not isinstance(value, bool):
+def _ensure_bool(name: str, value: Any) -> bool | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "yes"}:
+            return True
+        if lowered in {"false", "no"}:
+            return False
+    else:
         raise ValidationError(f"{name} must be a boolean")
-    return value
+    raise ValidationError(f"{name} must be a boolean")
 
 
 def _ensure_string_list(name: str, value: Any) -> list[str]:
@@ -34,22 +46,26 @@ def _ensure_string_list(name: str, value: Any) -> list[str]:
         raise ValidationError(f"{name} must be a list of strings")
     output: list[str] = []
     for item in value:
-        output.append(_ensure_string(name, item))
+        text = _ensure_string(name, item)
+        if text:
+            output.append(text)
     return output
 
 
 @dataclass(slots=True)
 class EgoVehicle:
-    speed_kmh: float
-    acceleration_ms2: float
-    heading_deg: float
+    speed_kmh: float | None
+    acceleration_ms2: float | None
+    heading_deg: float | None
     lane_position: str
-    braking_distance_m: float
-    mass_kg: float
-    passenger_at_risk: bool = False
+    braking_distance_m: float | None
+    mass_kg: float | None
+    passenger_at_risk: bool | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "EgoVehicle":
+        if not isinstance(data, dict):
+            data = {}
         return cls(
             speed_kmh=_ensure_number("ego_vehicle.speed_kmh", data.get("speed_kmh")),
             acceleration_ms2=_ensure_number("ego_vehicle.acceleration_ms2", data.get("acceleration_ms2")),
@@ -57,21 +73,23 @@ class EgoVehicle:
             lane_position=_ensure_string("ego_vehicle.lane_position", data.get("lane_position")),
             braking_distance_m=_ensure_number("ego_vehicle.braking_distance_m", data.get("braking_distance_m")),
             mass_kg=_ensure_number("ego_vehicle.mass_kg", data.get("mass_kg")),
-            passenger_at_risk=_ensure_bool("ego_vehicle.passenger_at_risk", data.get("passenger_at_risk", False)),
+            passenger_at_risk=_ensure_bool("ego_vehicle.passenger_at_risk", data.get("passenger_at_risk")),
         )
 
 
 @dataclass(slots=True)
 class Environment:
     road_type: str
-    speed_limit_kmh: float
+    speed_limit_kmh: float | None
     weather: str
-    visibility_m: float
+    visibility_m: float | None
     time_of_day: str
     traffic_density: str
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Environment":
+        if not isinstance(data, dict):
+            data = {}
         return cls(
             road_type=_ensure_string("environment.road_type", data.get("road_type")),
             speed_limit_kmh=_ensure_number("environment.speed_limit_kmh", data.get("speed_limit_kmh")),
@@ -86,16 +104,18 @@ class Environment:
 class Obstacle:
     id: str
     type: str
-    distance_m: float
-    relative_speed_kmh: float
-    time_to_impact_s: float
+    distance_m: float | None
+    relative_speed_kmh: float | None
+    time_to_impact_s: float | None
     trajectory: str
     vulnerability_class: str
-    mass_kg: float
-    responsible_for_risk: bool
+    mass_kg: float | None
+    responsible_for_risk: bool | None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Obstacle":
+        if not isinstance(data, dict):
+            data = {}
         return cls(
             id=_ensure_string("obstacles[].id", data.get("id")),
             type=_ensure_string("obstacles[].type", data.get("type")),
@@ -111,14 +131,16 @@ class Obstacle:
 
 @dataclass(slots=True)
 class SensorConfidence:
-    lidar: float
-    camera: float
-    radar: float
-    overall_scene_confidence: float
+    lidar: float | None
+    camera: float | None
+    radar: float | None
+    overall_scene_confidence: float | None
     occluded_zones: list[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "SensorConfidence":
+        if not isinstance(data, dict):
+            data = {}
         return cls(
             lidar=_ensure_number("sensor_confidence.lidar", data.get("lidar")),
             camera=_ensure_number("sensor_confidence.camera", data.get("camera")),
@@ -138,16 +160,18 @@ class Scenario:
     obstacles: list[Obstacle]
     sensor_confidence: SensorConfidence
     available_actions: list[str]
-    collision_unavoidable: bool
+    collision_unavoidable: bool | None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Scenario":
         if not isinstance(data, dict):
             raise ValidationError("scenario must be a dictionary")
-        obstacles_raw = data.get("obstacles")
-        if not isinstance(obstacles_raw, list) or not obstacles_raw:
-            raise ValidationError("obstacles must be a non-empty list")
-        available_actions = _ensure_string_list("available_actions", data.get("available_actions"))
+        obstacles_raw = data.get("obstacles", [])
+        if obstacles_raw is None:
+            obstacles_raw = []
+        if not isinstance(obstacles_raw, list):
+            raise ValidationError("obstacles must be a list")
+        available_actions = _ensure_string_list("available_actions", data.get("available_actions", []))
         return cls(
             ego_vehicle=EgoVehicle.from_dict(data.get("ego_vehicle", {})),
             environment=Environment.from_dict(data.get("environment", {})),

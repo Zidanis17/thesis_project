@@ -197,7 +197,7 @@ class AgenticControllerTests(unittest.TestCase):
         self.assertEqual(assessment.candidate_frameworks[0], "EF-02")
 
     def test_pipeline_returns_agentic_assessment(self) -> None:
-        pipeline = ScenarioPipeline(reasoning_llm=None)
+        pipeline = ScenarioPipeline(reasoning_llm=None, auto_rag=False)
 
         result = pipeline.run(build_payload())
 
@@ -210,7 +210,7 @@ class AgenticControllerTests(unittest.TestCase):
         self.assertIn("agentic_assessment", result.to_dict())
 
     def test_pipeline_includes_agentic_validation_when_reasoning_result_exists(self) -> None:
-        pipeline = ScenarioPipeline(reasoning_llm=FakeReasoner())
+        pipeline = ScenarioPipeline(reasoning_llm=FakeReasoner(), auto_rag=False)
 
         result = pipeline.run(build_payload())
 

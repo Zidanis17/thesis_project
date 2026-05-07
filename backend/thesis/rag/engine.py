@@ -9,6 +9,12 @@ from typing import TYPE_CHECKING, Any
 from .._env import load_project_env
 from ..mathematical_layer import MathematicalLayerResult
 from ..models import Scenario
+from ..normalization import (
+    VRU_TYPES as SHARED_VRU_TYPES,
+    VRU_VULNERABILITY_CLASSES as SHARED_VRU_VULNERABILITY_CLASSES,
+    canonicalize_road_type,
+    canonicalize_weather,
+)
 
 if TYPE_CHECKING:
     from ..agentic_controller import RetrievalIntent
@@ -86,30 +92,8 @@ class DeterministicRAGRetriever:
 
     # Excerpt shown in the result summary — full_content is passed to the LLM layer.
     EXCERPT_LIMIT = 1500
-    WEATHER_CANONICAL_MAP = {
-        "light_rain": "rain",
-        "overcast": "clear",
-    }
-    ROAD_TYPE_CANONICAL_MAP = {
-        "urban_arterial": "urban",
-        "residential_street": "residential",
-        "urban_intersection": "intersection",
-        "ring_road": "highway",
-        "highway_merge": "highway",
-        "hospital_access_road": "hospital_zone",
-    }
-    VRU_TYPES = {
-        "pedestrian",
-        "pedestrian_adult",
-        "adult_pedestrian",
-        "child_pedestrian",
-        "elderly_pedestrian",
-        "cyclist",
-        "motorcyclist",
-        "hidden_pedestrian",
-        "hidden_cyclist",
-    }
-    VRU_VULNERABILITY_CLASSES = {"high", "child", "elderly", "cyclist", "pedestrian"}
+    VRU_TYPES = SHARED_VRU_TYPES
+    VRU_VULNERABILITY_CLASSES = SHARED_VRU_VULNERABILITY_CLASSES
 
     def __init__(
         self,
@@ -248,15 +232,17 @@ class DeterministicRAGRetriever:
         ) or "no obstacles"
 
         actions = ", ".join(scenario.available_actions) or "none"
-        road_type = self._canonical_road_type(scenario.environment.road_type)
-        weather = self._canonical_weather(scenario.environment.weather)
+        road_type = self._canonical_road_type(scenario.environment.road_type) or "unknown"
+        weather = self._canonical_weather(scenario.environment.weather) or "unknown"
+        time_of_day = scenario.environment.time_of_day or "unknown time"
+        traffic_density = scenario.environment.traffic_density or "unknown"
 
         query = (
             f"Autonomous vehicle ethical decision-making: "
             f"{road_type} road, "
             f"{weather} weather, "
-            f"{scenario.environment.time_of_day}, "
-            f"{scenario.environment.traffic_density} traffic density. "
+            f"{time_of_day}, "
+            f"{traffic_density} traffic density. "
             f"Collision unavoidable: {scenario.collision_unavoidable}. "
             f"Road users involved: {obstacle_summary}. "
             f"Available actions: {actions}. "
@@ -265,7 +251,7 @@ class DeterministicRAGRetriever:
             f"is most appropriate and why?"
         )
 
-        if mathematical_layer_result is not None:
+        if mathematical_layer_result is not None and mathematical_layer_result.risk_score_matrix:
             violated = ", ".join(mathematical_layer_result.violated_rules) or "none"
             query += (
                 f" RSS rules violated: {violated}. "
@@ -298,16 +284,16 @@ class DeterministicRAGRetriever:
 
         vru_present = self._vru_present(scenario)
 
-        if not scenario.collision_unavoidable:
+        if scenario.collision_unavoidable is False:
             hints.append("deontological rule-based safety RSS responsibility sensitive")
 
         if vru_present:
             hints.append("maximin worst-off protection vulnerable road user child elderly cyclist")
 
-        if scenario.collision_unavoidable and not vru_present:
+        if scenario.collision_unavoidable is True and not vru_present:
             hints.append("utilitarian aggregate risk minimization total harm")
 
-        if scenario.collision_unavoidable and vru_present:
+        if scenario.collision_unavoidable is True and vru_present:
             hints.append("ethics of risk weighted distribution equity fairness")
             hints.append(
                 "ethical valence theory passenger pedestrian social valence hierarchy "
@@ -463,15 +449,15 @@ class DeterministicRAGRetriever:
         # Priority ordering based on the selection heuristic
         def priority(doc: AlwaysIncludedDocument) -> int:
             name = doc.title.lower()
-            if not scenario.collision_unavoidable and "deontolog" in name:
+            if scenario.collision_unavoidable is False and "deontolog" in name:
                 return 0
             if vru_present and "maximin" in name:
                 return 0
-            if scenario.collision_unavoidable and not vru_present and "utilitarian" in name:
+            if scenario.collision_unavoidable is True and not vru_present and "utilitarian" in name:
                 return 0
-            if scenario.collision_unavoidable and vru_present and "ethics of risk" in name:
+            if scenario.collision_unavoidable is True and vru_present and "ethics of risk" in name:
                 return 0
-            if scenario.collision_unavoidable and vru_present and (
+            if scenario.collision_unavoidable is True and vru_present and (
                 "valence" in name or "evt" in name
             ):
                 return 0
@@ -493,12 +479,10 @@ class DeterministicRAGRetriever:
         )
 
     def _canonical_weather(self, weather: str) -> str:
-        value = weather.strip().lower()
-        return self.WEATHER_CANONICAL_MAP.get(value, value)
+        return canonicalize_weather(weather)
 
     def _canonical_road_type(self, road_type: str) -> str:
-        value = road_type.strip().lower()
-        return self.ROAD_TYPE_CANONICAL_MAP.get(value, value)
+        return canonicalize_road_type(road_type)
 
     def _build_vector_store(self) -> Any:
         import chromadb

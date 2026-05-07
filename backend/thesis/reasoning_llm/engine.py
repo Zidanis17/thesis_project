@@ -197,7 +197,7 @@ class EthicalReasoningLLM:
                 "weights_reasoning": "string - why these weights suit this scenario",
                 "risk_scores_per_action": (
                     "copy mathematical_layer.risk_score_matrix exactly; "
-                    "use {} when mathematical_layer.runtime_status is not_requested"
+                    "use {} when mathematical_layer is not_requested or insufficient_data"
                 ),
                 "rationale": "string - cite retrieved framework_ids and their fields",
                 "confidence": "number between 0 and 1",
@@ -207,7 +207,7 @@ class EthicalReasoningLLM:
         return (
             "Produce the final ethical analysis as a JSON object.\n"
             "Copy risk_scores_per_action from mathematical_layer.risk_score_matrix exactly; "
-            "if the mathematical layer is not_requested, return an empty object for risk_scores_per_action.\n"
+            "if the mathematical layer is not_requested or insufficient_data, return an empty object for risk_scores_per_action.\n"
             "Do not include a recommended_action field.\n"
             "Cite retrieved EKB framework_ids in your rationale when RAG context is available.\n\n"
             "The agentic_assessment is a deterministic routing and validation aid. "
@@ -450,8 +450,11 @@ class EthicalReasoningLLM:
         if not bool(global_metrics.get("scene_interpretable", True)):
             return framework == "EF-06"
 
-        if not scenario.collision_unavoidable:
+        if scenario.collision_unavoidable is False:
             return framework == "EF-02"
+
+        if scenario.collision_unavoidable is None:
+            return framework == "EF-06"
 
         if framework == "EF-02":
             return False
@@ -479,8 +482,11 @@ class EthicalReasoningLLM:
         if not bool(global_metrics.get("scene_interpretable", True)):
             return "EF-06"
 
-        if not scenario.collision_unavoidable:
+        if scenario.collision_unavoidable is False:
             return "EF-02"
+
+        if scenario.collision_unavoidable is None:
+            return "EF-06"
 
         if self._has_passenger_valence_signal(
             parser_result=parser_result,
@@ -494,7 +500,15 @@ class EthicalReasoningLLM:
         return "EF-01"
 
     def _requires_virtue_fallback(self, parser_result: ParserResult) -> bool:
-        return any("unknown" in obstacle.type.lower() for obstacle in parser_result.scenario.obstacles)
+        scenario = parser_result.scenario
+        if not scenario.available_actions or not scenario.obstacles:
+            return True
+        if scenario.collision_unavoidable is None:
+            return True
+        return any(
+            not obstacle.type.strip() or "unknown" in obstacle.type.lower()
+            for obstacle in parser_result.scenario.obstacles
+        )
 
     def _has_priority_vru(self, scenario: Scenario) -> bool:
         for obstacle in scenario.obstacles:
@@ -520,7 +534,7 @@ class EthicalReasoningLLM:
         )
 
     def _scenario_shows_passenger_vru_tradeoff(self, scenario: Scenario) -> bool:
-        if not scenario.collision_unavoidable:
+        if scenario.collision_unavoidable is not True:
             return False
         if not self._vru_stakeholder_ids(scenario):
             return False
