@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from ..models import ParserResult, Scenario
-from ..normalization import (
+from ..core.models import ParserResult, Scenario
+from ..core.normalization import (
     VRU_TYPES as SHARED_VRU_TYPES,
     VRU_VULNERABILITY_CLASSES as SHARED_VRU_VULNERABILITY_CLASSES,
 )

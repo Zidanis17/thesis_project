@@ -4,7 +4,7 @@ import json
 import re
 from typing import Any
 
-from ..pipeline import ScenarioPipelineResult
+from ..core.pipeline import ScenarioPipelineResult
 from .payload import strip_payload_metadata
 
 __all__ = [

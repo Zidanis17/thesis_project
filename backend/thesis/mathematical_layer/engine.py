@@ -61,8 +61,8 @@ from dataclasses import asdict, dataclass, field
 from math import cos, radians, exp
 from typing import Any
 
-from ..models import Scenario
-from ..normalization import (
+from ..core.models import Scenario
+from ..core.normalization import (
     VULNERABILITY_TO_PROTECTED as SHARED_VULNERABILITY_TO_PROTECTED,
     canonicalize_road_type,
     canonicalize_trajectory,

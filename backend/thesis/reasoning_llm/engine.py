@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from .._env import load_project_env
 from ..mathematical_layer import MathematicalLayerResult
-from ..models import ParserResult, Scenario
+from ..core.models import ParserResult, Scenario
 from ..rag import RAGRetrievalResult
 from .prompt import ETHICAL_REASONING_SYSTEM_PROMPT
 

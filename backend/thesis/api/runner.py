@@ -9,7 +9,7 @@ from typing import Any, Literal
 
 from ..agentic_controller import AgenticEthicalController
 from ..mathematical_layer import DeterministicMathematicalLayer, MathematicalLayerResult
-from ..pipeline import ScenarioPipelineResult
+from ..core.pipeline import ScenarioPipelineResult
 from ..rag import DeterministicRAGRetriever, LazyRAGRuntime
 from ..reasoning_llm import EthicalReasoningLLM, EthicalReasoningResult
 from ..scenario_parser import DeterministicScenarioParser, ScenarioParseError

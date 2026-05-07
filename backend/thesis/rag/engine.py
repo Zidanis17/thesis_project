@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING, Any
 
 from .._env import load_project_env
 from ..mathematical_layer import MathematicalLayerResult
-from ..models import Scenario
-from ..normalization import (
+from ..core.models import Scenario
+from ..core.normalization import (
     VRU_TYPES as SHARED_VRU_TYPES,
     VRU_VULNERABILITY_CLASSES as SHARED_VRU_VULNERABILITY_CLASSES,
     canonicalize_road_type,

@@ -5,8 +5,8 @@ import re
 from dataclasses import asdict
 from typing import Any, Mapping, Protocol
 
-from ..models import ParserResult, Scenario, ValidationError
-from ..normalization import (
+from ..core.models import ParserResult, Scenario, ValidationError
+from ..core.normalization import (
     canonicalize_action,
     canonicalize_obstacle_type,
     canonicalize_occlusion_zone,
