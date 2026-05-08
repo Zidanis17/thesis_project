@@ -268,6 +268,35 @@ export interface EvaluationRunHistoryResponse {
   subdivision_runs: number
 }
 
+export interface AblatableField {
+  path: string
+  label: string
+  group: string
+}
+
+export interface FieldAblationResult {
+  ablation_label: string
+  fields_removed: string[]
+  dominant_framework: string | null
+  deterministic_best_action: string | null
+  confidence: number | null
+  rationale: string | null
+  weights: Record<string, number>
+  math_runtime_available: boolean
+  reasoning_runtime_available: boolean
+  rag_runtime_available: boolean
+  status: 'success' | 'error'
+  error_code: string | null
+  error_message: string | null
+  duration_ms: number
+  best_action_by_total_risk: string | null
+}
+
+export interface FieldAblationCompareResponse {
+  baseline: FieldAblationResult
+  ablations: FieldAblationResult[]
+}
+
 export interface LegacySubdivisionRunResponse {
   subdivision: ScenarioSubdivision
   summary: {

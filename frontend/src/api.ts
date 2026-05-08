@@ -1,7 +1,9 @@
 import type {
+  AblatableField,
   EvaluationVariant,
   EvaluationRunHistoryResponse,
   EvaluationRunResponse,
+  FieldAblationCompareResponse,
   HealthResponse,
   InputEditorMode,
   RunEnvelope,
@@ -141,4 +143,32 @@ export async function fetchEvaluationById(evaluationId: string): Promise<Evaluat
     throw new Error(payload.error?.message ?? `Stored evaluation request failed with status ${response.status}.`)
   }
   return readJson<EvaluationRunResponse>(response)
+}
+
+export async function fetchAblatableFields(): Promise<AblatableField[]> {
+  const response = await fetch(`${API_BASE}/api/v1/ablation/fields`)
+  if (!response.ok) throw new Error('Failed to load ablatable fields.')
+  const data = await readJson<{ fields: AblatableField[] }>(response)
+  return data.fields
+}
+
+export async function runFieldAblationCompare(
+  input: string | Record<string, unknown>,
+  inputModeHint: InputEditorMode,
+  ablationGroups: string[][],
+): Promise<FieldAblationCompareResponse> {
+  const response = await fetch(`${API_BASE}/api/v1/ablation/field-compare`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      input,
+      input_mode_hint: inputModeHint,
+      ablation_groups: ablationGroups,
+    }),
+  })
+  if (!response.ok) {
+    const payload = await readJson<{ error?: { message?: string } }>(response)
+    throw new Error(payload.error?.message ?? `Field ablation request failed with status ${response.status}.`)
+  }
+  return readJson<FieldAblationCompareResponse>(response)
 }

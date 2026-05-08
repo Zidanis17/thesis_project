@@ -1204,6 +1204,45 @@ def _variant_disables_math(variant: EvaluationVariant) -> bool:
     return variant in {"no_math", "no_rag_no_math"}
 
 
+def apply_field_ablation(
+    payload: str | dict[str, Any],
+    fields_to_remove: list[str],
+) -> str | dict[str, Any]:
+    """Remove dot-notation field paths from a scenario JSON payload.
+
+    Supported path forms:
+      - "ego_vehicle.mass_kg"           — remove scalar field
+      - "obstacles.mass_kg"             — remove field from every obstacle
+      - "sensor_confidence.lidar"       — remove sensor field
+      - "collision_unavoidable"         — remove top-level field
+    """
+    if not fields_to_remove or isinstance(payload, str):
+        return payload
+    import copy
+    result = copy.deepcopy(payload)
+    for path in fields_to_remove:
+        _ablate_path(result, path.split("."))
+    return result
+
+
+def _ablate_path(obj: Any, parts: list[str]) -> None:
+    if not parts or not isinstance(obj, dict):
+        return
+    key = parts[0]
+    rest = parts[1:]
+    if key == "obstacles":
+        if not rest:
+            obj.pop("obstacles", None)
+        else:
+            for obstacle in obj.get("obstacles") or []:
+                _ablate_path(obstacle, rest)
+        return
+    if not rest:
+        obj.pop(key, None)
+    elif key in obj:
+        _ablate_path(obj[key], rest)
+
+
 def _prepare_input(payload: str | dict[str, Any], input_mode_hint: InputModeHint) -> str | dict[str, Any]:
     if input_mode_hint == "auto":
         return strip_payload_metadata(payload)

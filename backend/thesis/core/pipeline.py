@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Mapping
 
 from ..agentic_controller import (
     AgenticAssessment,
@@ -13,6 +14,9 @@ from .models import ParserResult, Scenario
 from ..rag import DeterministicRAGRetriever, LazyRAGRuntime, RAGRetrievalResult
 from ..reasoning_llm import EthicalReasoningLLM, EthicalReasoningResult
 from ..scenario_parser import DeterministicScenarioParser
+
+if TYPE_CHECKING:
+    from ..ekb_generator import EKBGeneratorResult
 
 __all__ = [
     "ScenarioPipeline",
@@ -145,6 +149,39 @@ class ScenarioPipeline:
             reasoning_result=reasoning_result,
             agentic_validation_result=agentic_validation_result,
         )
+
+
+    @classmethod
+    def setup_ekb(
+        cls,
+        *,
+        force: bool = False,
+        model: str | None = None,
+        knowledge_base_path: str | Path | None = None,
+    ) -> "EKBGeneratorResult":
+        """
+        Generate the six EF-0X ethical framework files from the German Ethics Commission
+        report and academic papers, then rebuild ChromaDB.
+
+        This is a one-time setup operation.  If all six files already exist and *force* is
+        False the method returns immediately without calling the LLM.
+
+        Parameters
+        ----------
+        force:
+            Regenerate and overwrite existing framework files.
+        model:
+            LLM model name (default: EKBGeneratorAgent.DEFAULT_MODEL = "gpt-4o").
+        knowledge_base_path:
+            Override the knowledge base directory (default: backend/knowledge_base/).
+        """
+        from ..ekb_generator import EKBGeneratorAgent
+
+        agent = EKBGeneratorAgent(
+            model=model or EKBGeneratorAgent.DEFAULT_MODEL,
+            knowledge_base_path=knowledge_base_path,
+        )
+        return agent.generate(force=force)
 
 
 # Backward-compatible aliases for the previous public API.
